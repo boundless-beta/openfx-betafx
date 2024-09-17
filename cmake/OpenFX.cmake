@@ -2,11 +2,11 @@
 
 if(NOT PLUGIN_INSTALLDIR)
   if(APPLE)
-    set(PLUGIN_INSTALLDIR "/Library/OFX/Plugins/OpenFX Examples")
+    set(PLUGIN_INSTALLDIR "/Library/OFX/Plugins")
   elseif(WIN32)
-    set(PLUGIN_INSTALLDIR "C:/Program Files/Common Files/OFX/Plugins/OpenFX Examples")
+    set(PLUGIN_INSTALLDIR "C:/Program Files/Common Files/OFX/Plugins")
   elseif(UNIX)
-    set(PLUGIN_INSTALLDIR "/usr/OFX/Plugins/OpenFX Examples")
+    set(PLUGIN_INSTALLDIR "/usr/OFX/Plugins")
   else()
     set(PLUGIN_INSTALLDIR "/unknown-os")
   endif()
@@ -45,8 +45,10 @@ function(add_ofx_plugin TARGET)
   set(BUNDLE_SIGNATURE "????")  # any value is OK here, ignored by modern MacOS
   set(PLUGIN_VERSION "1.0.0")
 
-  configure_file(${CMAKE_SOURCE_DIR}/Examples/Info.plist.in
-                 "${PLUGIN_INSTALLDIR}/${TARGET}.ofx.bundle/Contents/Info.plist")
+  # this line was giving me issues :/
+  
+  # configure_file(${CMAKE_SOURCE_DIR}/Examples/Info.plist.in
+  #                "${PLUGIN_INSTALLDIR}/${TARGET}.ofx.bundle/Contents/Info.plist")
 
   # Set symbol visibility hidden. Individual symbols are exposed via
   # __declspec(dllexport) or __attribute__((visibility("default")))

@@ -120,7 +120,7 @@ conan install ${GENERATOR_OPTION} -s build_type=$BUILDTYPE -pr:b=default --build
 echo === Running cmake
 # Generate the build files
 [[ $USE_OPENCL ]] && cmake_opts="$cmake_opts -DOFX_SUPPORTS_OPENCLRENDER=TRUE"
-cmake --preset ${PRESET_NAME} -DBUILD_EXAMPLE_PLUGINS=TRUE $cmake_opts $ARGS
+cmake --preset ${PRESET_NAME} -DBUILD_EXAMPLE_PLUGINS=FALSE $cmake_opts $ARGS
 
 echo === Building and installing plugins and support libs
 cmake --build ${CMAKE_BUILD_DIR} --target install --config $BUILDTYPE --parallel $VERBOSE

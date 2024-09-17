@@ -1,20 +1,10 @@
 include(OpenFX)
 
-set(PLUGINS
-	Basic
-	ChoiceParams
-	Field
-	Generator
-	GPUGain
-	Invert
-	MultiBundle
-	Retimer
-	Tester
-	Transition)
+set(PLUGINS BetaFX)
 
 foreach(PLUGIN IN LISTS PLUGINS)
 	file(GLOB_RECURSE PLUGIN_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${PLUGIN}/*.cpp")
-	if (${PLUGIN} STREQUAL "GPUGain")
+	if (${PLUGIN} STREQUAL "BetaFX")
           if(APPLE)
             file(GLOB_RECURSE METAL_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/${PLUGIN}/*.mm") # add Metal kernel
             list(APPEND PLUGIN_SOURCES ${METAL_SOURCES})
@@ -24,11 +14,12 @@ foreach(PLUGIN IN LISTS PLUGINS)
             list(APPEND PLUGIN_SOURCES ${CUDA_SOURCES})
           endif()
           if (NOT OFX_SUPPORTS_OPENCLRENDER)
-            list(FILTER PLUGIN_SOURCES EXCLUDE REGEX "OpenCLKernel")
+            list(FILTER PLUGIN_SOURCES EXCLUDE REGEX "TransformKernel")
+            list(FILTER PLUGIN_SOURCES EXCLUDE REGEX "OpenCLKernelKernel")
           endif()
 	endif()
 
-	set(TGT example-${PLUGIN}-support)
+	set(TGT ${PLUGIN})
 	add_ofx_plugin(${TGT} ${PLUGIN})
 	target_sources(${TGT} PUBLIC ${PLUGIN_SOURCES})
 	target_link_libraries(${TGT} ${CONAN_LIBS} OfxSupport opengl::opengl)
