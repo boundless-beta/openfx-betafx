@@ -72,7 +72,7 @@ private:
 #endif
 };
 
-const char* fallbackKernel = "kReadIndex = (float2)(x, y); kRead()";
+const char* fallbackKernel = "kReadIndex = (float2)(x, y); ";
 
 template<class PIX>
 void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const PIX* p_Input, PIX* p_Output)
@@ -160,18 +160,17 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
         strcpy(kernStr, kernThing.c_str());
         cl_program program = clCreateProgramWithSource(clContext, 1, (const char**)&kernStr, NULL, &error);
         CheckError(error, "Unable to create program");
+        if (error != CL_SUCCESS) {
         error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
         char errorInfo[65536];
-        if (error != CL_SUCCESS) {
-            kernThing = fallbackKernel;
-            kReadPos = kernThing.find("kRead()");
-            if (kReadPos != std::string::npos) kernThing.replace(kReadPos, 7, kReadBuffer);
-            kernThing = kernelStart + kernThing + kernelEnd;
+        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
+            kernThing = kernelStart + fallbackKernel + kReadBuffer + kernelEnd;
 
             char* kernFallback = new char[kernThing.length() + 1];
             strcpy(kernFallback, kernThing.c_str());
             program = clCreateProgramWithSource(clContext, 1, (const char**)&kernFallback, NULL, &error);
         error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
+        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
         }
         CheckError(error, "Unable to build program");
 
@@ -295,17 +294,16 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
         CheckError(error, "Unable to create program");
 
         error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+        if (error != CL_SUCCESS) {
         char errorInfo[65536];
         error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
-        if (error != CL_SUCCESS) {
-            kernThing = fallbackKernel;
-            kReadPos = kernThing.find("kRead()");
-            if (kReadPos != std::string::npos) kernThing.replace(kReadPos, 7, kReadBuffer);
-            kernThing = kernelStart + kernThing + kernelEnd;
+            kernThing = kernelStart + fallbackKernel + kReadBuffer + kernelEnd;
 
             char* kernFallback = new char[kernThing.length() + 1];
             strcpy(kernFallback, kernThing.c_str());
             program = clCreateProgramWithSource(clContext, 1, (const char**)&kernFallback, NULL, &error);
+        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
+        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
         }
 
         CheckError(error, "Unable to build program");
