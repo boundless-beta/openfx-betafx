@@ -17,6 +17,7 @@
 #include "ofxsMultiThread.h"
 #include "ofxsProcessing.h"
 #include "ofxsLog.h"
+#include "BetaFXCommon.h"
 
 #define kPluginName "BetaFX Dynamic Transform"
 #define kPluginGrouping "BetaFX"
@@ -40,6 +41,7 @@ std::vector<double> lastRate2(18 * INSTANCE_COUNT, 0);
 std::vector<double> lastRateW(18 * INSTANCE_COUNT, 0);
 std::vector<double> lastRateW2(18 * INSTANCE_COUNT, 0);
 int instanceStarted[INSTANCE_COUNT];
+int transformIndex;
 
 float buffersCPU[64][16][25];
 static void initBufferCPU() {
@@ -676,6 +678,7 @@ private:
     OFX::ChoiceParam* m_WrapY;
     OFX::BooleanParam* m_WrapZ;
     OFX::DoubleParam* m_Blur;
+    int instanceHandle;
 };
 
 static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::DoubleParam* rateG, double timeIn, double timeOut, double fr, bool isWiggle) {
@@ -705,7 +708,7 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
         }
     }
     double g = 0.;
-    for (double i = inTime; i < timeOut; i += 1.) {
+    for (double i = inTime; i <= timeOut; i += 1.) {
         d = rate->getValueAtTime(i);
         if (rateG != NULL) {
             g = rateG->getValueAtTime(i);
@@ -713,7 +716,7 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
         else {
             g = 1.;
         }
-        p += (g * d);
+        p += (g * d) * 60./fr;
     }
     if (isWiggle) {
         if (offset > 8) {
@@ -761,7 +764,7 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
     double tempo = 1.;
     double elast = 0.;
     bool bounc = false;
-    for (double i = inTime; i < timeOut; i += 1.) { // += fr / 240.
+    for (double i = inTime; i <= timeOut; i += 1.) { // += fr / 240.
         //           0?       p_Args.time(+1)
         value = param->getValueAtTime(i);
         tempo = a->getValueAtTime(i);
@@ -877,11 +880,11 @@ static inline int threadQuery(std::thread::id threadId)
     return theThread;
 }
 
-static inline int imageQuery(OFX::Clip* image)
+static inline int imageQuery(OfxImageEffectHandle image)
 {
-    static std::map<OFX::Clip*, int> threadIO;
+    static std::map<OfxImageEffectHandle, int> threadIO;
     int theImage = 0;
-    std::map<OFX::Clip*, int>::iterator iter = threadIO.find(image);
+    std::map<OfxImageEffectHandle, int>::iterator iter = threadIO.find(image);
     if (iter == threadIO.end())
     {
         theImage = threadIO.size();
@@ -971,6 +974,7 @@ TransformGPU::TransformGPU(OfxImageEffectHandle p_Handle)
     m_HasParent = fetchIntParam("hasParent");
     m_Temp = fetchDoubleParam("tempo");
     m_Elast = fetchDoubleParam("elast");
+    instanceHandle = imageQuery(p_Handle);
 }
 
 void TransformGPU::render(const OFX::RenderArguments& p_Args)
@@ -1010,7 +1014,8 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
         instanceStarted[i] = 0;
     }
     int thisThread = threadQuery(std::this_thread::get_id());
-    int instanceIndex = imageQuery(m_SrcClip) % INSTANCE_COUNT;
+    transformIndex = thisThread;
+    int instanceIndex = instanceHandle % INSTANCE_COUNT;
 
     instanceStarted[instanceIndex] = instanceStarted[instanceIndex] == 0 ? 1 : 2;
 

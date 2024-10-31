@@ -9,7 +9,8 @@
 #include <map>
 #include <math.h>
 #include <stdio.h>
-#define CL_TARGET_OPENCL_VERSION 300
+#define CL_TARGET_OPENCL_VERSION 200
+
 
 #ifdef __APPLE__
 #include <OpenCL/cl.h>
@@ -19,6 +20,7 @@
 #endif
 
 #include "CLFuncs.h"
+#include "BetaFXCommon.h"
 
 float buffers[64][16][25];                                                                                                             
 void initBuffer() {
