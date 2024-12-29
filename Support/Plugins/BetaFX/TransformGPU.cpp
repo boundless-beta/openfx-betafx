@@ -24,7 +24,7 @@
 #define kPluginDescription "Transform an image using various static and animated parameters"
 #define kPluginIdentifier "betafx:DynamicTransform"
 #define kPluginVersionMajor 2
-#define kPluginVersionMinor 1
+#define kPluginVersionMinor 4
 
 #define kSupportsTiles false
 #define kSupportsMultiResolution false
@@ -369,19 +369,18 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
 
             if (off == 1) {
                 float value[4] = { 0.,0.,0.,0. };
-                float bMax = ceil(bP[24] * 20.);
-                bMax = bMax < 1. ? 1. : bMax;
+                int bMax = (int)ceil(bP[24] * 32.);
+                bMax = bMax < 1 ? 1 : bMax;
                 float uv[2] = { 0,0 };
-                for (float bl = 0.; bl < bMax; bl += 1.) {
+                for (int b = 1; b <= bMax; b++) {
                     float plot[2] = { 0., 0. };
-                    float size[2] = { 0., 0. };
-                    float d = 0., fac = 0.;
-                    for (int s = 0; s < 3; s++) {
-                        int sx = x + (s % 2);
-                        int sy = y + (s / 2);
-                        double b = bl / bMax;
-                        uv[0] = sx / xWin;
-                        uv[1] = sy / yWin;
+                    float d = 0., fac = 0.; 
+                    float rng = sin((index) * 112.9898f * b + 179.233f) * 43758.5453f;
+                    rng -= floor(rng);
+					rng += b - 1; 
+					rng /= bMax;
+                        uv[0] = x / xWin;
+                        uv[1] = y / yWin;
                         uv[0] -= 0.5;
                         uv[1] -= 0.5;
                         uv[0] *= ratio;
@@ -391,10 +390,10 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
                         double m[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
                         double p[3] = { 0.,0.,1. };
                         for (int i = 0; i < 9; i++) {
-                            m[i] = bP[3 + i] * (1. - b * bP[24]) + bP[15 + i] * b * bP[24];
+                            m[i] = bP[3 + i] * (1. - rng * bP[24]) + bP[15 + i] * rng * bP[24];
                         }
                         for (int i = 0; i < 3; i++) {
-                            p[i] = bP[i] * (1. - b * bP[24]) + bP[12 + i] * b * bP[24]; //part 2 :O
+                            p[i] = bP[i] * (1. - rng * bP[24]) + bP[12 + i] * rng * bP[24]; //part 2 :O
                         }
                         double l1[3] = { p[0], p[1], (p[2] + 1.) };
                         double l2[3] = { uv[0] + p[0], uv[1] + p[1], p[2] };		// = -0.5
@@ -418,36 +417,15 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
                         uhh[1] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * yA[0];
                         uhh[0] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * xA[1];
                         uhh[1] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * yA[1];
-                        switch (s) {
-                        case 0:
                             plot[0] = uhh[0];
                             plot[1] = uhh[1];
-                            break;
-                        case 1:
-                            size[0] = fabs(uhh[0] - plot[0]) * xWin;
-                            break;
-                        case 2:
-                            size[1] = fabs(uhh[1] - plot[1]) * yWin;
-                        }
-                    }
                     plot[0] /= ratio;
                     plot[0] += 0.5;
                     plot[1] += 0.5;
                     bool fwd = front == 0 && d > 0.;
 
-                    double blxFloat = log2(fmax(size[0], size[1]));
-
-                    blxFloat = blxFloat < 1. ? 1. : blxFloat;
-                    // large value = smaller scale 
-                    int blMax = floor(blxFloat);
-                    blMax = fmin(log2(fmin(xWin, yWin) - 1), fmax(0, blMax));
-                    int xmipOffset = 0;
-                    int xmip = xWin, ymip = yWin;
-
-                    double tx = plot[0] * xmip;
-                    double ty = plot[1] * ymip;
-                    double mipRatio = (double)xmip / ymip - xWin / yWin;
-                    // tx *= 1. + mipRatio;
+                    double tx = plot[0] * xWin;
+                    double ty = plot[1] * yWin;
                     switch ((int)(wX)) {
                     case 2:
                         tx = tx - xWin * floor(tx / xWin);
@@ -685,7 +663,7 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
     int index = instance * 18 + offset;
     double d = 0.;
     double p, inTime;
-    if ((offset <= 8 && lastTime[instance] >= timeOut) || (offset > 8 && lastTime[instance] + 1. >= timeOut)) {
+    if (lastTime[instance] > timeOut || timeOut == timeIn || lastTime[instance] == 0.) {
         p = 0.;
         inTime = timeIn;
     }
@@ -693,22 +671,24 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
         if (isWiggle) {
             p = lastRateW[index];
             inTime = lastTime[instance];
-            if (offset > 8) {
-                inTime += 1.;
-                p = lastRateW2[index];
-            }
+            // if (offset > 8) {
+            //     inTime += 1.;
+            //     p = lastRateW2[index];
+            // }
         }
         else {
             p = lastRate[index];
             inTime = lastTime[instance];
-            if (offset > 8) {
-                inTime += 1.;
-                p = lastRate2[index];
-            }
+            // if (offset > 8) {
+            //     inTime += 1.;
+            //     p = lastRate2[index];
+            // }
         }
     }
-    double g = 0.;
+    double g = 0., r = 0.;
     for (double i = inTime; i <= timeOut; i += 1.) {
+        r = (g * d) * 60. / fr;
+        p += r;
         d = rate->getValueAtTime(i);
         if (rateG != NULL) {
             g = rateG->getValueAtTime(i);
@@ -716,22 +696,15 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
         else {
             g = 1.;
         }
-        p += (g * d) * 60./fr;
     }
     if (isWiggle) {
-        if (offset > 8) {
-            lastRateW2[index] = p;
-        }
-        else {
-            lastRateW[index] = p;
-        }
+        lastRateW[index] = p;
     } else {
-        if (offset > 8) {
-            lastRate2[index] = p;
-        }
-        else {
-            lastRate[index] = p;
-        }
+        lastRate[index] = p;
+    }
+    if (offset > 8) {
+        r = (g * d) * 60. / fr;
+        p += r;
     }
     return p;
 }
@@ -739,38 +712,36 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
 static double processToTime(int instance, int offset, OFX::DoubleParam* param, double timeIn, double timeOut, double fr, OFX::DoubleParam* a, OFX::DoubleParam* b, OFX::BooleanParam* bounce)
 {
     int index = instance * 18 + offset;
-    double result, vel, inTime;
-    if ((offset <= 8 && lastTime[instance] >= timeOut) || (offset > 8 && lastTime[instance]+1. >= timeOut)) {
+    double result, vel, inTime, value0, value1;
+    if (lastTime[instance] > timeOut || timeOut == timeIn || lastTime[instance] == 0.) {
         // first set            p_Args.time               second set              p_Args.time + 1.
         vel = 0.;
         inTime = timeIn;
         result = param->getValueAtTime(timeIn);
+        value0 = 0.;
+        value1 = 0.;
     }
     else {
         result = lastValue[index];
         vel = lastVel[index];
         inTime = lastTime[instance];
-        if (offset > 8) {
-            inTime += 1.;
-            result = lastValue2[index];
-            vel = lastVel2[index];
-        }
+        value0 = lastValue2[index];
+        value1 = param->getValueAtTime(inTime - 1.);
+        // if (offset > 8) {
+        //     inTime += 1.;
+        //     result = lastValue2[index];
+        //     vel = lastVel2[index];
+        // }
     }
     double phase = 0.;
-    double value = 0.;
-    double value0 = 0.;
-    double value1 = 0.;
+    double value = param->getValueAtTime(inTime);
     double diff = 0.;
-    double tempo = 1.;
-    double elast = 0.;
-    bool bounc = false;
-    for (double i = inTime; i <= timeOut; i += 1.) { // += fr / 240.
-        //           0?       p_Args.time(+1)
-        value = param->getValueAtTime(i);
-        tempo = a->getValueAtTime(i);
-        elast = b->getValueAtTime(i);
+    double tempo = a->getValueAtTime(inTime);
+    double elast = b->getValueAtTime(inTime);
+    bool bounc = bounce->getValueAtTime(inTime);
+    for (double i = inTime + 1.; i <= timeOut; i += 1.) { // += fr / 240.
         value0 = value1 != value ? value1 : value0;
-        bounc = bounce->getValueAtTime(i);
+        //           0?       p_Args.time(+1)
         tempo = pow(tempo, log2(1.+fr/15.)); // 64. (retain functionality)
         // vel = bounc ? fabs(vel) : vel;
         diff = value - result;
@@ -784,32 +755,83 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
             vel *= -1.;
         }
         value1 = value;
+        value = param->getValueAtTime(i);
+        tempo = a->getValueAtTime(i);
+        elast = b->getValueAtTime(i);
+        bounc = bounce->getValueAtTime(i);
     }
+    lastValue[index] = result;
+    lastValue2[index] = value0;
+    lastVel[index] = vel;
     if (offset > 8) {
-        lastValue2[index] = result;
-        lastVel2[index] = vel;
+        value0 = value1 != value ? value1 : value0;
+        tempo = pow(tempo, log2(1. + fr / 15.)); // 64. (retain functionality)
+        // vel = bounc ? fabs(vel) : vel;
+        diff = value - result;
+        vel += diff * tempo;
+        result = result * (1. - tempo) + value * tempo;
+        result += vel * elast * tempo;
+        double polarity = ceil(value - value0) * 2. - 1.;
+        polarity = polarity > 0. ? 1. : -1.;
+        if (bounc && diff * polarity < 0.) {
+            result = value;
+            vel *= -1.;
+        }
     }
-    else {
-        lastValue[index] = result;
-        lastVel[index] = vel;
-    }
+
     return result;
 }
 
 static double oscillate(double t, double p) {
     return sin(((t / 60.) + p) * 3.14159265 * 2.);
 }
+/* old perlin function
 static inline double perlin(double x, double s) {
     double h0 = 2. * fmod((34902.134 + s * 1000.) * sin((54.4329 + s) * 930. * floor(x)), 1.) - 1.;
     double h1 = 2. * fmod((34902.134 + s * 1000.) * sin((54.4329 + s) * 930. * floor(x + 1.)), 1.) - 1.;
     double f = pow(fmod(x, 1.), 2.) * (3. - 2. * fmod(x, 1.));
     return h0 * (-f + 1.) + h1 * f;
 }
+*/
+static inline double perlin(double x, double s, double y) {
+    float seed, sx, sy, x0, y0;
+    float rx, ry, n0 = 0, n1 = 0, value;
+    float ix0 = 0, ix1 = 0;
+    for (int yi = 0; yi < 2; yi++) { // y loop
+
+        y0 = (int)floor(y) + yi;
+        sy = y - (float)y0;
+
+        for (int xi = 0; xi < 2; xi++) { // x loop
+
+            x0 = (int)floor(x) + xi;
+            sx = x - (float)x0;
+            seed = (s + x0 + y0 * 112.9898) * 12345.67;
+            rx = sin((seed) * 112.9898 + 179.233) * 43758.5453;
+            rx = 2 * (rx - (int)rx) - 1;
+            seed = (sin(seed) * 23498.61) * 12345.67;
+            ry = cos((seed) * 112.9898 + 179.233) * 43758.5453;
+            ry = 2 * (ry - (int)ry) - 1;
+            n0 = n1;
+            n1 = (sx * rx + sy * ry);
+        }
+        ix0 = ix1;
+        x0 = (int)floor(x);
+        sx = x - (float)x0;
+        ix1 = (n1 - n0) * (3.0 - sx * 2.0) * sx * sx + n0;
+    }
+    y0 = (int)floor(y);
+    sy = y - (float)y0;
+    value = (ix1 - ix0) * (3.0 - sy * 2.0) * sy * sy + ix0;
+
+    return 2. * value - 1.;
+}
+
 static double wiggle(double seed, double offset, double t, int oct)
 {
     double n = 0.;
     for (int i = 0; i < oct; i++) {
-        n += ((perlin((t / 30. + offset) * pow(2., double(i)) + 3. * double(i), seed*oct)) + 1.) / pow(2., double(i));
+        n += ((perlin((t / 60. + offset) * pow(2., double(i)), seed*(i+1), 277.94*offset)) + 1.) / pow(2., double(i));
     }
     return n / 2.;
 }
@@ -1089,15 +1111,27 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     int octs = m_WOct->getValueAtTime(p_Args.time);
     double seedFactor = 10000 / 83; // arbitrarily odd value
 
-    double px0 = processToTime(instanceIndex, 0, m_Px, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double py0 = processToTime(instanceIndex, 1, m_Py, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double pz0 = processToTime(instanceIndex, 2, m_Pz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double rx0 = processToTime(instanceIndex, 3, m_Rx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double ry0 = processToTime(instanceIndex, 4, m_Ry, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double rz0 = processToTime(instanceIndex, 5, m_Rz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double sx0 = processToTime(instanceIndex, 6, m_Sx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double sy0 = processToTime(instanceIndex, 7, m_Sy, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    double sz0 = processToTime(instanceIndex, 8, m_Sz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    double px0, py0, pz0, rx0, ry0, rz0, sx0, sy0, sz0, px1, py1, pz1, rx1, ry1, rz1, sx1, sy1, sz1;
+
+    px0 = processToTime(instanceIndex, 0, m_Px, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    py0 = processToTime(instanceIndex, 1, m_Py, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    pz0 = processToTime(instanceIndex, 2, m_Pz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    rx0 = processToTime(instanceIndex, 3, m_Rx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    ry0 = processToTime(instanceIndex, 4, m_Ry, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    rz0 = processToTime(instanceIndex, 5, m_Rz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    sx0 = processToTime(instanceIndex, 6, m_Sx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    sy0 = processToTime(instanceIndex, 7, m_Sy, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    sz0 = processToTime(instanceIndex, 8, m_Sz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+
+    px1 = processToTime(instanceIndex, 9, m_Px, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    py1 = processToTime(instanceIndex, 10, m_Py, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    pz1 = processToTime(instanceIndex, 11, m_Pz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    rx1 = processToTime(instanceIndex, 12, m_Rx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    ry1 = processToTime(instanceIndex, 13, m_Ry, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    rz1 = processToTime(instanceIndex, 14, m_Rz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    sx1 = processToTime(instanceIndex, 15, m_Sx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    sy1 = processToTime(instanceIndex, 16, m_Sy, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    sz1 = processToTime(instanceIndex, 17, m_Sz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
 
     px0 += wiggle(seed, 1. * seedFactor, rateScalar(instanceIndex, 0, m_WrPx, m_WrGl, t1, p_Args.time, frameRate, true), octs) * pxws;
     py0 += wiggle(seed, 2. * seedFactor, rateScalar(instanceIndex, 1, m_WrPy, m_WrGl, t1, p_Args.time, frameRate, true), octs) * pyws;
@@ -1119,36 +1153,26 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     sy0 += oscillate(rateScalar(instanceIndex, 7, m_OrSy, m_OrGl, t1, p_Args.time, frameRate, false), syop) * syos;
     sz0 += oscillate(rateScalar(instanceIndex, 8, m_OrSz, m_OrGl, t1, p_Args.time, frameRate, false), szop) * szos;
 
-    double px1 = processToTime(instanceIndex,  9, m_Px, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double py1 = processToTime(instanceIndex, 10, m_Py, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double pz1 = processToTime(instanceIndex, 11, m_Pz, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double rx1 = processToTime(instanceIndex, 12, m_Rx, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double ry1 = processToTime(instanceIndex, 13, m_Ry, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double rz1 = processToTime(instanceIndex, 14, m_Rz, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double sx1 = processToTime(instanceIndex, 15, m_Sx, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double sy1 = processToTime(instanceIndex, 16, m_Sy, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
-    double sz1 = processToTime(instanceIndex, 17, m_Sz, t1, p_Args.time + 1., frameRate, m_Temp, m_Elast, m_Bounce);
+    px1 += wiggle(seed, 1. * seedFactor, rateScalar(instanceIndex, 9, m_WrPx, m_WrGl, t1, p_Args.time, frameRate, true), octs) * pxws;
+    py1 += wiggle(seed, 2. * seedFactor, rateScalar(instanceIndex, 10, m_WrPy, m_WrGl, t1, p_Args.time, frameRate, true), octs) * pyws;
+    pz1 += wiggle(seed, 3. * seedFactor, rateScalar(instanceIndex, 11, m_WrPz, m_WrGl, t1, p_Args.time, frameRate, true), octs) * pzws;
+    rx1 += wiggle(seed, 4. * seedFactor, rateScalar(instanceIndex, 12, m_WrRx, m_WrGl, t1, p_Args.time, frameRate, true), octs) * rxws * 180.;
+    ry1 += wiggle(seed, 5. * seedFactor, rateScalar(instanceIndex, 13, m_WrRy, m_WrGl, t1, p_Args.time, frameRate, true), octs) * ryws * 180.;
+    rz1 += wiggle(seed, 6. * seedFactor, rateScalar(instanceIndex, 14, m_WrRz, m_WrGl, t1, p_Args.time, frameRate, true), octs) * rzws * 180.;
+    sx1 += wiggle(seed, 7. * seedFactor, rateScalar(instanceIndex, 15, m_WrSx, m_WrGl, t1, p_Args.time, frameRate, true), octs) * sxws;
+    sy1 += wiggle(seed, 8. * seedFactor, rateScalar(instanceIndex, 16, m_WrSy, m_WrGl, t1, p_Args.time, frameRate, true), octs) * syws;
+    sz1 += wiggle(seed, 9. * seedFactor, rateScalar(instanceIndex, 17, m_WrSz, m_WrGl, t1, p_Args.time, frameRate, true), octs) * szws;
 
-    px1 += wiggle(seed, 1. * seedFactor, rateScalar(instanceIndex,  9, m_WrPx, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * pxws;
-    py1 += wiggle(seed, 2. * seedFactor, rateScalar(instanceIndex, 10, m_WrPy, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * pyws;
-    pz1 += wiggle(seed, 3. * seedFactor, rateScalar(instanceIndex, 11, m_WrPz, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * pzws;
-    rx1 += wiggle(seed, 4. * seedFactor, rateScalar(instanceIndex, 12, m_WrRx, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * rxws * 180.;
-    ry1 += wiggle(seed, 5. * seedFactor, rateScalar(instanceIndex, 13, m_WrRy, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * ryws * 180.;
-    rz1 += wiggle(seed, 6. * seedFactor, rateScalar(instanceIndex, 14, m_WrRz, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * rzws * 180.;
-    sx1 += wiggle(seed, 7. * seedFactor, rateScalar(instanceIndex, 15, m_WrSx, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * sxws;
-    sy1 += wiggle(seed, 8. * seedFactor, rateScalar(instanceIndex, 16, m_WrSy, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * syws;
-    sz1 += wiggle(seed, 9. * seedFactor, rateScalar(instanceIndex, 17, m_WrSz, m_WrGl, t1, p_Args.time + 1., frameRate, true), octs) * szws;
+    px1 += oscillate(rateScalar(instanceIndex, 9, m_OrPx, m_OrGl, t1, p_Args.time, frameRate, false), pxop) * pxos;
+    py1 += oscillate(rateScalar(instanceIndex, 10, m_OrPy, m_OrGl, t1, p_Args.time, frameRate, false), pyop) * pyos;
+    pz1 += oscillate(rateScalar(instanceIndex, 11, m_OrPz, m_OrGl, t1, p_Args.time, frameRate, false), pzop) * pzos;
+    rx1 += oscillate(rateScalar(instanceIndex, 12, m_OrRx, m_OrGl, t1, p_Args.time, frameRate, false), rxop) * rxos * 180.;
+    ry1 += oscillate(rateScalar(instanceIndex, 13, m_OrRy, m_OrGl, t1, p_Args.time, frameRate, false), ryop) * ryos * 180.;
+    rz1 += oscillate(rateScalar(instanceIndex, 14, m_OrRz, m_OrGl, t1, p_Args.time, frameRate, false), rzop) * rzos * 180.;
+    sx1 += oscillate(rateScalar(instanceIndex, 15, m_OrSx, m_OrGl, t1, p_Args.time, frameRate, false), sxop) * sxos;
+    sy1 += oscillate(rateScalar(instanceIndex, 16, m_OrSy, m_OrGl, t1, p_Args.time, frameRate, false), syop) * syos;
+    sz1 += oscillate(rateScalar(instanceIndex, 17, m_OrSz, m_OrGl, t1, p_Args.time, frameRate, false), szop) * szos;
 
-    px1 += oscillate(rateScalar(instanceIndex,  9, m_OrPx, m_OrGl, t1, p_Args.time + 1., frameRate, false), pxop) * pxos;
-    py1 += oscillate(rateScalar(instanceIndex, 10, m_OrPy, m_OrGl, t1, p_Args.time + 1., frameRate, false), pyop) * pyos;
-    pz1 += oscillate(rateScalar(instanceIndex, 11, m_OrPz, m_OrGl, t1, p_Args.time + 1., frameRate, false), pzop) * pzos;
-    rx1 += oscillate(rateScalar(instanceIndex, 12, m_OrRx, m_OrGl, t1, p_Args.time + 1., frameRate, false), rxop) * rxos * 180.;
-    ry1 += oscillate(rateScalar(instanceIndex, 13, m_OrRy, m_OrGl, t1, p_Args.time + 1., frameRate, false), ryop) * ryos * 180.;
-    rz1 += oscillate(rateScalar(instanceIndex, 14, m_OrRz, m_OrGl, t1, p_Args.time + 1., frameRate, false), rzop) * rzos * 180.;
-    sx1 += oscillate(rateScalar(instanceIndex, 15, m_OrSx, m_OrGl, t1, p_Args.time + 1., frameRate, false), sxop) * sxos;
-    sy1 += oscillate(rateScalar(instanceIndex, 16, m_OrSy, m_OrGl, t1, p_Args.time + 1., frameRate, false), syop) * syos;
-    sz1 += oscillate(rateScalar(instanceIndex, 17, m_OrSz, m_OrGl, t1, p_Args.time + 1., frameRate, false), szop) * szos;
-    
     lastTime[instanceIndex] = p_Args.time;
     // parameters end here
 
