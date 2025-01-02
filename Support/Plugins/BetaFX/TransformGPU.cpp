@@ -17,14 +17,13 @@
 #include "ofxsMultiThread.h"
 #include "ofxsProcessing.h"
 #include "ofxsLog.h"
-#include "BetaFXCommon.h"
 
 #define kPluginName "BetaFX Dynamic Transform"
 #define kPluginGrouping "BetaFX"
 #define kPluginDescription "Transform an image using various static and animated parameters"
 #define kPluginIdentifier "betafx:DynamicTransform"
 #define kPluginVersionMajor 2
-#define kPluginVersionMinor 4
+#define kPluginVersionMinor 5
 
 #define kSupportsTiles false
 #define kSupportsMultiResolution false
@@ -41,6 +40,18 @@ std::vector<double> lastRate2(18 * INSTANCE_COUNT, 0);
 std::vector<double> lastRateW(18 * INSTANCE_COUNT, 0);
 std::vector<double> lastRateW2(18 * INSTANCE_COUNT, 0);
 int instanceStarted[INSTANCE_COUNT];
+float buffers[64][16][25];
+
+void initBuffer() {
+    for (int i = 0; i < 64; i++) {
+        for (int j = 0; j < 16; j++) {
+            for (int k = 0; k < 25; k++) {
+                buffers[i][j][k] = k % 4 == 3 ? 1. : 0.;
+            }
+        }
+    }
+}
+
 int transformIndex;
 
 float buffersCPU[64][16][25];
@@ -372,57 +383,72 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
                 int bMax = (int)ceil(bP[24] * 32.);
                 bMax = bMax < 1 ? 1 : bMax;
                 float uv[2] = { 0,0 };
+                float plot[2] = { 0., 0. };
+                float plot1[2] = { 0., 0. };
+                float plot2[2] = { 0., 0. };
+                float d = 0., fac = 0.;
+                bool fwd, horizon;
+
+                for (int r = 0; r < 2; r++) {
+                    uv[0] = x / xWin;
+                    uv[1] = y / yWin;
+                    uv[0] -= 0.5;
+                    uv[1] -= 0.5;
+                    uv[0] *= ratio;
+                    double zA[3] = { 0., 0., 1. };
+                    double xA[3] = { 1., 0., 0. };
+                    double yA[3] = { 0., 1., 0. };
+                    double m[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+                    double p[3] = { 0.,0.,1. };
+                    for (int i = 0; i < 9; i++) {
+                        m[i] = bP[3 + i] * (1. - r * bP[24]) + bP[15 + i] * r * bP[24];
+                    }
+                    for (int i = 0; i < 3; i++) {
+                        p[i] = bP[i] * (1. - r * bP[24]) + bP[12 + i] * r * bP[24]; //part 2 :O
+                    }
+                    double l1[3] = { p[0], p[1], (p[2] + 1.) };
+                    double l2[3] = { uv[0] + p[0], uv[1] + p[1], p[2] };		// = -0.5
+                    double l1t[3] = { l1[0],l1[1],l1[2] };
+                    double l2t[3] = { l2[0],l2[1],l2[2] };
+                    l1[0] = l1t[0] * m[0] + l1t[1] * m[1] + l1t[2] * m[2];
+                    l2[0] = l2t[0] * m[0] + l2t[1] * m[1] + l2t[2] * m[2];
+                    l1[1] = l1t[0] * m[3] + l1t[1] * m[4] + l1t[2] * m[5];
+                    l2[1] = l2t[0] * m[3] + l2t[1] * m[4] + l2t[2] * m[5];
+                    l1[2] = l1t[0] * m[6] + l1t[1] * m[7] + l1t[2] * m[8];
+                    l2[2] = l2t[0] * m[6] + l2t[1] * m[7] + l2t[2] * m[8];
+                    for (int i = 0; i < 3; i++) {
+                        d += zA[i] * (l2[i] - l1[i]);
+                    }
+                    for (int i = 0; i < 3; i++) {
+                        fac += zA[i] * l1[i];
+                    }
+                    fac = ((d > 0. ? (wZ == 1. ? 1. : 0.) : 0.) - fac) / d;
+                    fwd = front == 0 && d > 0.;
+                    horizon = fac < 0. || fwd;
+                    double uhh[2] = { 0., 0. };
+                    if (r == 0) {
+                        plot1[0] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * xA[0];
+                        plot1[1] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * yA[0];
+                        plot1[0] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * xA[1];
+                        plot1[1] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * yA[1];
+                    }
+                    else {
+                        plot2[0] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * xA[0];
+                        plot2[1] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * yA[0];
+                        plot2[0] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * xA[1];
+                        plot2[1] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * yA[1];
+                    }
+                }
                 for (int b = 1; b <= bMax; b++) {
-                    float plot[2] = { 0., 0. };
-                    float d = 0., fac = 0.; 
                     float rng = sin((index) * 112.9898f * b + 179.233f) * 43758.5453f;
                     rng -= floor(rng);
 					rng += b - 1; 
 					rng /= bMax;
-                        uv[0] = x / xWin;
-                        uv[1] = y / yWin;
-                        uv[0] -= 0.5;
-                        uv[1] -= 0.5;
-                        uv[0] *= ratio;
-                        double zA[3] = { 0., 0., 1. };
-                        double xA[3] = { 1., 0., 0. };
-                        double yA[3] = { 0., 1., 0. };
-                        double m[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
-                        double p[3] = { 0.,0.,1. };
-                        for (int i = 0; i < 9; i++) {
-                            m[i] = bP[3 + i] * (1. - rng * bP[24]) + bP[15 + i] * rng * bP[24];
-                        }
-                        for (int i = 0; i < 3; i++) {
-                            p[i] = bP[i] * (1. - rng * bP[24]) + bP[12 + i] * rng * bP[24]; //part 2 :O
-                        }
-                        double l1[3] = { p[0], p[1], (p[2] + 1.) };
-                        double l2[3] = { uv[0] + p[0], uv[1] + p[1], p[2] };		// = -0.5
-                        double l1t[3] = { l1[0],l1[1],l1[2] };
-                        double l2t[3] = { l2[0],l2[1],l2[2] };
-                        l1[0] = l1t[0] * m[0] + l1t[1] * m[1] + l1t[2] * m[2];
-                        l2[0] = l2t[0] * m[0] + l2t[1] * m[1] + l2t[2] * m[2];
-                        l1[1] = l1t[0] * m[3] + l1t[1] * m[4] + l1t[2] * m[5];
-                        l2[1] = l2t[0] * m[3] + l2t[1] * m[4] + l2t[2] * m[5];
-                        l1[2] = l1t[0] * m[6] + l1t[1] * m[7] + l1t[2] * m[8];
-                        l2[2] = l2t[0] * m[6] + l2t[1] * m[7] + l2t[2] * m[8];
-                        for (int i = 0; i < 3; i++) {
-                            d += zA[i] * (l2[i] - l1[i]);
-                        }
-                        for (int i = 0; i < 3; i++) {
-                            fac += zA[i] * l1[i];
-                        }
-                        fac = ((d > 0. ? (wZ == 1. ? 1. : 0.) : 0.) - fac) / d;
-                        double uhh[2] = { 0., 0. };
-                        uhh[0] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * xA[0];
-                        uhh[1] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * yA[0];
-                        uhh[0] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * xA[1];
-                        uhh[1] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * yA[1];
-                            plot[0] = uhh[0];
-                            plot[1] = uhh[1];
+                            plot[0] = plot1[0] * (1. - rng) - plot2[0] * rng;
+                            plot[1] = plot1[1] * (1. - rng) - plot2[1] * rng;
                     plot[0] /= ratio;
                     plot[0] += 0.5;
                     plot[1] += 0.5;
-                    bool fwd = front == 0 && d > 0.;
 
                     double tx = plot[0] * xWin;
                     double ty = plot[1] * yWin;
@@ -445,7 +471,6 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
                     int ix = (int)floor(tx);
                     int iy = (int)floor(ty);
 
-                    bool horizon = fac < 0. || fwd;
                     //mipped coords
                     if (!horizon && (tx >= 0. && tx < xWin) && (ty >= 0. && ty < yWin))
                     {
@@ -655,6 +680,7 @@ private:
     OFX::ChoiceParam* m_WrapX;
     OFX::ChoiceParam* m_WrapY;
     OFX::BooleanParam* m_WrapZ;
+    OFX::BooleanParam* m_xRatio;
     OFX::DoubleParam* m_Blur;
     int instanceHandle;
 };
@@ -713,7 +739,7 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
 {
     int index = instance * 18 + offset;
     double result, vel, inTime, value0, value1;
-    if (lastTime[instance] > timeOut || timeOut == timeIn || lastTime[instance] == 0.) {
+    if (lastTime[instance] >= timeOut || timeOut == timeIn || lastTime[instance] == 0.) {
         // first set            p_Args.time               second set              p_Args.time + 1.
         vel = 0.;
         inTime = timeIn;
@@ -764,6 +790,10 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
     lastValue2[index] = value0;
     lastVel[index] = vel;
     if (offset > 8) {
+        value = param->getValueAtTime(timeOut + 1.);
+        tempo = a->getValueAtTime(timeOut + 1.);
+        elast = b->getValueAtTime(timeOut + 1.);
+        bounc = bounce->getValueAtTime(timeOut + 1.);
         value0 = value1 != value ? value1 : value0;
         tempo = pow(tempo, log2(1. + fr / 15.)); // 64. (retain functionality)
         // vel = bounc ? fabs(vel) : vel;
@@ -836,6 +866,55 @@ static double wiggle(double seed, double offset, double t, int oct)
     return n / 2.;
 }
 
+static std::vector<double> crossMatrix(std::vector<double> ma, std::vector<double> mb) {
+    std::vector<double> n(9, 0);
+    std::vector<double> o(9, 0);
+    o = ma;
+    n = o;
+    o[0] = n[0] * mb[0] + n[1] * mb[3] + n[2] * mb[6];
+    o[1] = n[0] * mb[1] + n[1] * mb[4] + n[2] * mb[7];
+    o[2] = n[0] * mb[2] + n[1] * mb[5] + n[2] * mb[8];
+    o[3] = n[3] * mb[0] + n[4] * mb[3] + n[5] * mb[6];
+    o[4] = n[3] * mb[1] + n[4] * mb[4] + n[5] * mb[7];
+    o[5] = n[3] * mb[2] + n[4] * mb[5] + n[5] * mb[8];
+    o[6] = n[6] * mb[0] + n[7] * mb[3] + n[8] * mb[6];
+    o[7] = n[6] * mb[1] + n[7] * mb[4] + n[8] * mb[7];
+    o[8] = n[6] * mb[2] + n[7] * mb[5] + n[8] * mb[8];
+    return o;
+}
+static std::vector<double> getPos(std::vector<double> p, std::vector<double> m) {
+    std::vector<double> n(3, 0);
+    std::vector<double> o(3, 0);
+    n = p;
+    o[0] = n[0] * m[0] + n[1] * m[1] + n[2] * m[2];
+    o[1] = n[0] * m[3] + n[1] * m[4] + n[2] * m[5];
+    o[2] = n[0] * m[6] + n[1] * m[7] + n[2] * m[8];
+    return o;
+}
+static std::vector<double> inverseMatrix(std::vector<double> m) {
+    std::vector<double> n(9, 0);
+    std::vector<double> t(9, 0);
+    n[0] = m[4] * m[8] - m[5] * m[7];        // 0 1 2  0 1 2
+    n[1] = m[5] * m[6] - m[3] * m[8];        // 3 4 5  3 4 5
+    n[2] = m[3] * m[7] - m[4] * m[6];        // 6 7 8  6 7 8
+    n[3] = m[7] * m[2] - m[8] * m[1];
+    n[4] = m[8] * m[0] - m[6] * m[2];        // 0 1 2  0 1 2
+    n[5] = m[6] * m[1] - m[7] * m[0];        // 3 4 5  3 4 5
+    n[6] = m[1] * m[5] - m[2] * m[4];        // 6 7 8  6 7 8
+    n[7] = m[2] * m[3] - m[0] * m[5];
+    n[8] = m[0] * m[4] - m[1] * m[3];
+    t = n;
+    n[1] = t[3];
+    n[3] = t[1];
+    n[2] = t[6];
+    n[6] = t[2];
+    n[5] = t[7];
+    n[7] = t[5];
+    for (int i = 0; i < 9; i++) {
+        n[i] /= m[0] * t[0] + m[1] * t[1] + m[2] * t[2];
+    }
+    return n;
+}
 static inline std::vector<double> getMatrix(std::vector<double> m, double rx, double ry, double rz, double sx, double sy, double sz) {
     std::vector<double> n(9, 0.);
     std::vector<double> o(9, 0.);
@@ -992,6 +1071,7 @@ TransformGPU::TransformGPU(OfxImageEffectHandle p_Handle)
     m_WrapX = fetchChoiceParam("wrapX");
     m_WrapY = fetchChoiceParam("wrapY");
     m_WrapZ = fetchBooleanParam("wrapZ");
+    m_xRatio = fetchBooleanParam("xRatio");
     m_IsParent = fetchIntParam("isParent");
     m_HasParent = fetchIntParam("hasParent");
     m_Temp = fetchDoubleParam("tempo");
@@ -1043,6 +1123,8 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
 
     double t1 = m_SrcClip->getFrameRange().min;
     double frameRate = m_SrcClip->getFrameRate();
+    OfxRectD myBounds = m_SrcClip->getRegionOfDefinition(p_Args.time);
+    double ratio = (myBounds.x2 - myBounds.x1) / (myBounds.y2 - myBounds.y1);
 
     // this is where all of the parameters start
     bool off = m_Render->getValueAtTime(p_Args.time);
@@ -1051,6 +1133,7 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     m_WrapX->getValueAtTime(p_Args.time, wx);
     m_WrapY->getValueAtTime(p_Args.time, wy);
     bool wz = m_WrapZ->getValueAtTime(p_Args.time);
+    bool xRtio = m_xRatio->getValueAtTime(p_Args.time);
     int pIndex = m_HasParent->getValueAtTime(p_Args.time);
     int pSend = m_IsParent->getValueAtTime(p_Args.time);
     double bParams[25];
@@ -1173,6 +1256,12 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     sy1 += oscillate(rateScalar(instanceIndex, 16, m_OrSy, m_OrGl, t1, p_Args.time, frameRate, false), syop) * syos;
     sz1 += oscillate(rateScalar(instanceIndex, 17, m_OrSz, m_OrGl, t1, p_Args.time, frameRate, false), szop) * szos;
 
+    if (xRtio)
+    {
+        px0 *= ratio;
+        px1 *= ratio;
+    }
+
     lastTime[instanceIndex] = p_Args.time;
     // parameters end here
 
@@ -1181,32 +1270,84 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     std::vector<double> mat1 = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
     mat0 = getMatrix(mat0, rx0 / 180. * PI, ry0 / 180. * PI, rz0 / 180. * PI, sx0, sy0, sz0);
     mat1 = getMatrix(mat1, rx1 / 180. * PI, ry1 / 180. * PI, rz1 / 180. * PI, sx1, sy1, sz1);
-    bParams[0] = px0;
-    bParams[1] = py0;
-    bParams[2] = pz0;
-    bParams[3] = mat0[0];
-    bParams[4] = mat0[1];
-    bParams[5] = mat0[2];
-    bParams[6] = mat0[3];
-    bParams[7] = mat0[4];
-    bParams[8] = mat0[5];
-    bParams[9] = mat0[6];
-    bParams[10] = mat0[7];
-    bParams[11] = mat0[8];
-    bParams[12] = px1;
-    bParams[13] = py1;
-    bParams[14] = pz1;
-    bParams[15] = mat1[0];
-    bParams[16] = mat1[1];
-    bParams[17] = mat1[2];
-    bParams[18] = mat1[3];
-    bParams[19] = mat1[4];
-    bParams[20] = mat1[5];
-    bParams[21] = mat1[6];
-    bParams[22] = mat1[7];
-    bParams[23] = mat1[8];
-    bParams[24] = mb;
 
+    std::vector<double> mt0 = mat0;
+    std::vector<double> mt1 = mat1;
+    std::vector<double> pt0 = { px0, py0, pz0 };
+    std::vector<double> pt1 = { px1, py1, pz1 };
+    std::vector<double> m0 = mat0;
+    std::vector<double> m1 = mat1;
+    std::vector<double> p0 = { px0, py0, pz0 };
+    std::vector<double> p1 = { px1, py1, pz1 };
+    std::vector<double> mp0 = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+    std::vector<double> mp1 = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+    std::vector<double> mpt0 = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+    std::vector<double> mpt1 = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+    std::vector<double> pp0 = { 0.,0.,0. };
+    std::vector<double> pp1 = { 0.,0.,0. };
+    float mb0 = mb;
+    if (pIndex != 0) {
+        float pParams[25];
+        for (int i = 0; i < 25; i++) {
+            pParams[i] = buffers[thisThread][pIndex - 1][i];
+        }
+        pp0[0] = pParams[0];
+        pp0[1] = pParams[1];
+        pp0[2] = pParams[2];
+        mpt0[0] = pParams[3];
+        mpt0[1] = pParams[4];
+        mpt0[2] = pParams[5];
+        mpt0[3] = pParams[6];
+        mpt0[4] = pParams[7];
+        mpt0[5] = pParams[8];
+        mpt0[6] = pParams[9];
+        mpt0[7] = pParams[10];
+        mpt0[8] = pParams[11];
+        pp1[0] = pParams[12];
+        pp1[1] = pParams[13];
+        pp1[2] = pParams[14];
+        mpt1[0] = pParams[15];
+        mpt1[1] = pParams[16];
+        mpt1[2] = pParams[17];
+        mpt1[3] = pParams[18];
+        mpt1[4] = pParams[19];
+        mpt1[5] = pParams[20];
+        mpt1[6] = pParams[21];
+        mpt1[7] = pParams[22];
+        mpt1[8] = pParams[23];
+        mb0 += pParams[24];
+        m0 = crossMatrix(mt0, mpt0);
+        m1 = crossMatrix(mt1, mpt1);
+        mp0 = inverseMatrix(mpt0);
+        mp1 = inverseMatrix(mpt1);
+        p0 = getPos(pt0, mp0);
+        p1 = getPos(pt1, mp1);
+    }
+    bParams[0] = p0[0] + pp0[0];
+    bParams[1] = p0[1] + pp0[1];
+    bParams[2] = p0[2] + pp0[2];
+    bParams[3] = m0[0];
+    bParams[4] = m0[1];
+    bParams[5] = m0[2];
+    bParams[6] = m0[3];
+    bParams[7] = m0[4];
+    bParams[8] = m0[5];
+    bParams[9] = m0[6];
+    bParams[10] = m0[7];
+    bParams[11] = m0[8];
+    bParams[12] = p1[0] + pp1[0];
+    bParams[13] = p1[1] + pp1[1];
+    bParams[14] = p1[2] + pp1[2];
+    bParams[15] = m1[0];
+    bParams[16] = m1[1];
+    bParams[17] = m1[2];
+    bParams[18] = m1[3];
+    bParams[19] = m1[4];
+    bParams[20] = m1[5];
+    bParams[21] = m1[6];
+    bParams[22] = m1[7];
+    bParams[23] = m1[8];
+    bParams[24] = mb0;
     int bitDepth = srcBitDepth == OFX::eBitDepthUByte ? 8 : 32;
 
     p_DynamicTransform.setScales(bParams[0], bParams[1], bParams[2], bParams[3], bParams[4], bParams[5], bParams[6], bParams[7], bParams[8], bParams[9], bParams[10], bParams[11], bParams[12], bParams[13], bParams[14], bParams[15], bParams[16], bParams[17], bParams[18], bParams[19], bParams[20], bParams[21], bParams[22], bParams[23], wx, wy, wz, bParams[24], sx0, sy0, sz0, rx0, ry0, sz0, pIndex, pSend, thisThread, off, fwd, bitDepth);
@@ -1524,7 +1665,9 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     page->addChild(*choiceParam);
     boolParam = newBoolParam(p_Desc, "wrapZ", "Wrap Above Horizon", "Wrap image above horizon", miscGroup, false);
     page->addChild(*boolParam);
-    boolParam = newBoolParam(p_Desc, "renderToggle", "Toggle Render", "Output rendered image", miscGroup, true);
+    boolParam = newBoolParam(p_Desc, "xRatio", "Match Output Aspect", "Toggle translations to match output dimensions", miscGroup, false);
+    page->addChild(*boolParam);
+    boolParam = newBoolParam(p_Desc, "renderToggle", "Toggle Render", "Toggle image transforms when rendered", miscGroup, true);
     page->addChild(*boolParam);
     boolParam = newBoolParam(p_Desc, "backToggle", "Render Backface", "Render backface", miscGroup, true);
     page->addChild(*boolParam);

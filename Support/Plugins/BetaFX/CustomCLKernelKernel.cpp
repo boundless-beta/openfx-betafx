@@ -13,7 +13,7 @@
 #include <math.h>
 #include <stdio.h>
 
-#define CL_TARGET_OPENCL_VERSION 200
+#define CL_TARGET_OPENCL_VERSION 300
 #ifdef __APPLE__
 #include <OpenCL/cl.h>
 #else
@@ -107,16 +107,47 @@ static std::string kReadBuffer(int index) {
     //     return "kOutput = read_imagef(" + buff + ", imageSampler, kReadIndex.yx + (float2)0.5); \n";
     // }
     // else {
-        return "\n" \
-            "rIndex = ((int)kReadIndex.x + (int)kReadIndex.y * p_Width) * 4;         \n" \
-            "if(rIndex >= 0 && rIndex < p_Width * p_Height * 4) {         \n" \
-            "kOutput.x = " + buff + "[rIndex + 0]; \n" \
-            "kOutput.y = " + buff + "[rIndex + 1];\n" \
-            "kOutput.z = " + buff + "[rIndex + 2];\n" \
-            "kOutput.w = " + buff + "[rIndex + 3];\n" \
-            "} else {\n" \
-            "kOutput = (float4)0; \n" \
-                "}\n";
+    return "\n" \
+        "rIndex = ((int)kReadIndex.x + (int)kReadIndex.y * p_Width) * 4;         \n" \
+        "if(rIndex >= 0 && rIndex < p_Width * p_Height * 4) {         \n" \
+        "kOutput.x = " + buff + "[rIndex + 0]; \n" \
+        "kOutput.y = " + buff + "[rIndex + 1];\n" \
+        "kOutput.z = " + buff + "[rIndex + 2];\n" \
+        "kOutput.w = " + buff + "[rIndex + 3];\n" \
+        "} else {\n" \
+        "kOutput = (float4)0; \n" \
+        "}\n";
+    // }
+}static std::string kReadImage(int index) {
+    std::string buff = "";
+    switch (index) {
+    case 0:
+        buff = "kBuffer0";
+        break;
+    case 1:
+        buff = "kBuffer1";
+        break;
+    case 2:
+        buff = "kBuffer2";
+        break;
+    case 3:
+        buff = "kBuffer3";
+        break;
+    default:
+        buff = "p_Input";
+        break;
+    }
+    // if (index > -1) {
+    //     return "kOutput = read_imagef(" + buff + ", imageSampler, kReadIndex.yx + (float2)0.5); \n";
+    // }
+    // else {
+    return "\n" \
+        "rIndex = ((int)kReadIndex.x + (int)kReadIndex.y * p_Width) * 4;         \n" \
+        "if(rIndex >= 0 && rIndex < p_Width * p_Height * 4) {         \n" \
+        "kOutput = read_imagef(" + buff + ", imageSampler, kReadIndex); \n" \
+        "} else {\n" \
+        "kOutput = (float4)0; \n" \
+        "}\n";
     // }
 }
 
@@ -146,8 +177,29 @@ static std::string kWriteBuffer(int index) {
         + buff + "[index + 3] = kOutput.w;\n";
     // return "write_imagef(" + buff + ", (int2)(x, y), kOutput); \n";
 }
-// H005666
-// H005666
+
+static std::string kWriteImage(int index) {
+    std::string buff = "";
+    switch (index) {
+    case 0:
+        buff = "kBuffer0";
+        break;
+    case 1:
+        buff = "kBuffer1";
+        break;
+    case 2:
+        buff = "kBuffer2";
+        break;
+    case 3:
+        buff = "kBuffer3";
+        break;
+    default:
+        buff = "p_Output";
+        break;
+    }
+    return "write_imagef(" + buff + ", (int2)(x, y), kOutput); \n";
+}
+
 static inline cl_mem bufferQuery(cl_context clContext, cl_command_queue cmdQ, size_t bufferSize, cl_mem_flags flags, int index)
 {
     static std::map<int, cl_mem> bufferIO;
@@ -423,7 +475,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
             const std::string kBx = kernThing.substr(kReadPos + 6, 1);
             std::string kReadB = "";
             if (kBx == "1" || kBx == "2" || kBx == "3" || kBx == "0") {
-                kReadB = kReadBuffer(std::stoi(kBx));
+                kReadB = kReadImage(std::stoi(kBx));
                 kernThing.replace(kReadPos, 8, kReadB);
             }
             else if (kBx == ")") {
@@ -437,7 +489,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
         while (kWritePos != std::string::npos) {
             const std::string kBx = kernThing.substr(kWritePos + 7, 1);
             if (kBx == "1" || kBx == "2" || kBx == "3" || kBx == "0") {
-                std::string kWriteB = kWriteBuffer(std::stoi(kBx));
+                std::string kWriteB = kWriteImage(std::stoi(kBx));
                 kernThing.replace(kWritePos, 9, kWriteB);
             }
             kWritePos = kernThing.find("kWrite(", kWritePos + 1);
@@ -457,7 +509,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
         error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
         char errorInfo[65536];
         error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
-            kernThing = kernelStart + fallbackKernel + kReadBuffer(-1) + kernelEnd;
+            kernThing = kernelStart + fallbackKernel + kReadImage(-1) + kernelEnd;
 
             char* kernFallback = new char[kernThing.length() + 1];
             strcpy(kernFallback, kernThing.c_str());
