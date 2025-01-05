@@ -41,13 +41,14 @@ public:
     virtual void multiThreadProcessImages(OfxRectI p_ProcWindow);
 
     void setSrcImg(OFX::Image* p_SrcImg);
-    void setScales(std::string k, double* floats, int instanceCount, float timeIn);
+    void setScales(std::string k, double* floats, int instanceCount, bool errorCheck, float timeIn);
 
 private:
     OFX::Image* _srcImg;
     std::string kernel;
     float kFloats[16];
     int instance;
+    bool errorTogg;
     float time;
 };
 
@@ -57,10 +58,10 @@ CustomCL::CustomCL(OFX::ImageEffect& p_Instance)
 }
 
 template<class PIX>
-extern void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const PIX* p_Input, PIX* p_Output);
+extern void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output);
 
 template<class PIX>
-extern void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const PIX* p_Input, PIX* p_Output);
+extern void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output);
 // extern void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* p_Gain, const float* p_Input, float* p_Output);
 /* kernel parameter list
 int p_Width
@@ -131,23 +132,23 @@ void CustomCL::processImagesOpenCL()
     
     if (bitDepth == 8 && (inputUI || outputUI))
     {
-            RunOpenCLKernelImages<unsigned char>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, inputUI, outputUI);
+            RunOpenCLKernelImages<unsigned char>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputUI, outputUI);
     } else if (inputF || outputF) {
-            RunOpenCLKernelImages<float>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, inputF, outputF);
+            RunOpenCLKernelImages<float>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputF, outputF);
         }
     else if(bitDepth == 8)
     {
         inputUI = static_cast<unsigned char*>(_srcImg->getPixelData());
         outputUI = static_cast<unsigned char*>(_dstImg->getPixelData());
 
-        RunOpenCLKernelBuffers<unsigned char>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, inputUI, outputUI);
+        RunOpenCLKernelBuffers<unsigned char>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputUI, outputUI);
 }
     else
     {
         inputF = static_cast<float*>(_srcImg->getPixelData());
         outputF = static_cast<float*>(_dstImg->getPixelData());
 
-        RunOpenCLKernelBuffers<float>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, inputF, outputF);
+        RunOpenCLKernelBuffers<float>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputF, outputF);
 }
 #endif
 }
@@ -195,13 +196,16 @@ void CustomCL::setSrcImg(OFX::Image* p_SrcImg)
     _srcImg = p_SrcImg;
 }
 
-void CustomCL::setScales(std::string k, double* floats, int instanceCount, float timeIn)
+void CustomCL::setScales(std::string k, double* floats, int instanceCount, bool errorCheck, float timeIn)
 {
     kernel = k;
     for (int i = 0; i < 16; i++) {
         kFloats[i] = floats[i];
     }
     instance = instanceCount;
+
+    errorTogg = errorCheck;
+
     time = timeIn;
 }
 
@@ -226,6 +230,7 @@ private:
     OFX::Clip* m_SrcClip;
 
     OFX::StringParam* kernel;
+    OFX::BooleanParam* errorTogg;
     OFX::DoubleParam* float00;
     OFX::DoubleParam* float01;
     OFX::DoubleParam* float02;
@@ -267,6 +272,7 @@ CustomCLEffect::CustomCLEffect(OfxImageEffectHandle p_Handle)
     m_DstClip = fetchClip(kOfxImageEffectOutputClipName);
     m_SrcClip = fetchClip(kOfxImageEffectSimpleSourceClipName);
     kernel = fetchStringParam("kInput");
+    errorTogg = fetchBooleanParam("kErrors");
     float00 = fetchDoubleParam("kFloat00");
     float01 = fetchDoubleParam("kFloat01");
     float02 = fetchDoubleParam("kFloat02");
@@ -325,6 +331,7 @@ void CustomCLEffect::setupAndProcess(CustomCL& p_CustomCL, const OFX::RenderArgu
     double pFloats[16];
     std::string pKernel;
      kernel->getValueAtTime(p_Args.time, pKernel);
+     bool errors = errorTogg->getValueAtTime(p_Args.time);
      pFloats[0] = float00->getValueAtTime(p_Args.time);
      pFloats[1] = float01->getValueAtTime(p_Args.time);
      pFloats[2] = float02->getValueAtTime(p_Args.time);
@@ -343,7 +350,7 @@ void CustomCLEffect::setupAndProcess(CustomCL& p_CustomCL, const OFX::RenderArgu
     pFloats[15] = float15->getValueAtTime(p_Args.time);
     // parameters end here
 
-    p_CustomCL.setScales(pKernel, pFloats, instanceHandle, (p_Args.time / frameRate));
+    p_CustomCL.setScales(pKernel, pFloats, instanceHandle, errors, (p_Args.time / frameRate));
 
     // Set the images
     p_CustomCL.setDstImg(dst.get());
@@ -471,6 +478,18 @@ static BooleanParamDescriptor* newBoolParam(OFX::ImageEffectDescriptor& p_Desc, 
     return param;
 }
 
+static BooleanParamDescriptor* newBoolParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
+    const std::string& p_Hint, bool p_Default)
+{
+    BooleanParamDescriptor* param = p_Desc.defineBooleanParam(p_Name);
+    param->setLabels(p_Label, p_Label, p_Label);
+    param->setScriptName(p_Name);
+    param->setHint(p_Hint);
+    param->setDefault(p_Default);
+
+    return param;
+
+}
 
 void CustomCLEffectFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX::ContextEnum /*p_Context*/)
 {
@@ -501,6 +520,8 @@ void CustomCLEffectFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc
     stringParam->setDefault("kReadIndex = (float2)(x,y); kRead()");
     stringParam->setStringType(eStringTypeMultiLine);
 
+    BooleanParamDescriptor* boolParam = newBoolParam(p_Desc, "kErrors", "Display errors", "Display kernal compile errors in a pop-up dialog", false);
+    page->addChild(*boolParam);
     DoubleParamDescriptor* param = newDoubleParam(p_Desc, "kFloat00", "KFLOAT0", "Float 0", 0, -100000., -1., 0., 1., 100000.);
     page->addChild(*param);
     param = newDoubleParam(p_Desc, "kFloat01", "KFLOAT1", "Float 1", 0, -100000., -1., 0., 1., 100000.);

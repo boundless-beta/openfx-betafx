@@ -1462,7 +1462,8 @@ static BooleanParamDescriptor* newBoolParam(OFX::ImageEffectDescriptor& p_Desc, 
 
     return param;
 
-}static ChoiceParamDescriptor* newChoiceParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
+}
+static ChoiceParamDescriptor* newChoiceParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
                                                const std::string& p_Hint, GroupParamDescriptor* p_Parent)
 {
     ChoiceParamDescriptor* param = p_Desc.defineChoiceParam(p_Name);

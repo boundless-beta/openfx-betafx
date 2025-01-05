@@ -12,6 +12,7 @@
 #include <vector>
 #include <math.h>
 #include <stdio.h>
+#include <stdexcept>
 
 #define CL_TARGET_OPENCL_VERSION 300
 #ifdef __APPLE__
@@ -231,7 +232,7 @@ static inline cl_mem bufferQuery(cl_context clContext, cl_command_queue cmdQ, si
 }
 
 template<class PIX>
-void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const PIX* p_Input, PIX* p_Output)
+void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output)
 {
     cl_int error;
 
@@ -282,7 +283,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
             "   float2 kReadIndex(0,0);                                           \n" \
             "   if ((x < p_Width) && (y < p_Height))                                \n" \
             "   {                                                                   \n";
-        std::string kernelEnd ="                                                                       \n" \
+        std::string kernelEnd = "                                                                       \n" \
             "				if (bits == 8) {                                                                                                     \n"\
             "					kOutput.x = fmin(kOutput.x, 255.0);                                                                                 \n"\
             "					kOutput.y = fmin(kOutput.y, 255.0);                                                                                 \n"\
@@ -328,17 +329,20 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
         cl_program program = clCreateProgramWithSource(clContext, 1, (const char**)&kernStr, NULL, &error);
         CheckError(error, "Unable to create program");
         if (error != CL_SUCCESS) {
-        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-        char errorInfo[65536];
-        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
-            kernThing = kernelStart + fallbackKernel + kReadBuffer(-1) + kernelEnd;
+            error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+            char errorInfo[65536];
+            error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
+            kernThing = kernelStart + fallbackKernel + kReadBuffer(-1) + + "kOutput.yz *= (float2)0.5; " + kernelEnd;
 
-            char* kernFallback = new char[kernThing.length() + 1];
-            strcpy(kernFallback, kernThing.c_str());
-            program = clCreateProgramWithSource(clContext, 1, (const char**)&kernFallback, NULL, &error);
-        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
-        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+            char* kernStrf = new char[kernThing.length() + 1];
+            strcpy(kernStrf, kernThing.c_str());
+            program = clCreateProgramWithSource(clContext, 1, (const char**)&kernStrf, NULL, &error);
+            error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+#ifdef _WIN64
+            if (errorLog) MessageBox(NULL, errorInfo, "BetaFX Custom OpenCL Kernel: compile error", MB_OK | MB_SETFOREGROUND | MB_ICONEXCLAMATION);
+#endif
         }
+
         CheckError(error, "Unable to build program");
 
         clKernel = clCreateKernel(program, "customKernel", &error);
@@ -351,7 +355,6 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
     {
         clKernel = kernelMap[instance];
     }
-    kernelStrings[instance] = kernel;
     locker.Unlock();
     if (!buffersCreated) {
         tBuffersCL = clCreateBuffer(clContext, CL_MEM_READ_ONLY | CL_MEM_USE_HOST_PTR, 64 * 25 * 16 * sizeof(float), &buffers, NULL);
@@ -408,7 +411,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
     clEnqueueNDRangeKernel(cmdQ, clKernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
 }
 template<class PIX>
-void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const PIX* p_Input, PIX* p_Output)
+void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output)
 {
     cl_int error;
 
@@ -463,7 +466,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
             "   float2 kReadIndex = (float2)(0,0);                                           \n" \
             "   if ((x < p_Width) && (y < p_Height))                                \n" \
             "   {                                                                   \n";
-        std::string kernelEnd ="write_imagef(p_Output, (int2)(x, y), kOutput);                      \n"\
+        std::string kernelEnd = "write_imagef(p_Output, (int2)(x, y), kOutput);                      \n"\
             "}                                                                   \n" \
             "}                                                                      \n";
         std::string::size_type kReadPos = kernel.find("kRead(");
@@ -501,22 +504,25 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
         char* kernStr = new char[kernThing.length() + 1];
         strcpy(kernStr, kernThing.c_str());
         cl_program program = clCreateProgramWithSource(clContext, 1, (const char**)&kernStr, NULL, &error);
+        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
         CheckError(error, "Unable to create program");
-        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-        char errorInfo[65536];
-        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
         if (error != CL_SUCCESS) {
-        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-        char errorInfo[65536];
-        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
-            kernThing = kernelStart + fallbackKernel + kReadImage(-1) + kernelEnd;
+            char errorInfo[65536];
+            error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
+            error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+            kernThing = kernelStart + fallbackKernel + kReadImage(-1) + "kOutput.yz *= (float2)0.5; " + kernelEnd;
 
-            char* kernFallback = new char[kernThing.length() + 1];
-            strcpy(kernFallback, kernThing.c_str());
-            program = clCreateProgramWithSource(clContext, 1, (const char**)&kernFallback, NULL, &error);
-        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
-        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+            char* kernStrf = new char[kernThing.length() + 1];
+            strcpy(kernStrf, kernThing.c_str());
+            program = clCreateProgramWithSource(clContext, 1, (const char**)&kernStrf, NULL, &error);
+            error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+#ifdef _WIN64
+            if (errorLog) MessageBox(NULL, errorInfo, "BetaFX Custom OpenCL Kernel: compile error", MB_OK | MB_SETFOREGROUND | MB_ICONEXCLAMATION);
+#endif
         }
+
+        kernelStrings[instance] = kernel;
+
 
         CheckError(error, "Unable to build program");
 
@@ -598,8 +604,8 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
     clEnqueueNDRangeKernel(cmdQ, clKernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
 }
 
-template void RunOpenCLKernelBuffers<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const unsigned char* p_Input, unsigned char* p_Output);
-template void RunOpenCLKernelBuffers<float>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const float* p_Input, float* p_Output);
+template void RunOpenCLKernelBuffers<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const unsigned char* p_Input, unsigned char* p_Output);
+template void RunOpenCLKernelBuffers<float>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const float* p_Input, float* p_Output);
 
-template void RunOpenCLKernelImages<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const unsigned char* p_Input, unsigned char* p_Output);
-template void RunOpenCLKernelImages<float>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, const float* p_Input, float* p_Output);
+template void RunOpenCLKernelImages<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const unsigned char* p_Input, unsigned char* p_Output);
+template void RunOpenCLKernelImages<float>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const float* p_Input, float* p_Output);
