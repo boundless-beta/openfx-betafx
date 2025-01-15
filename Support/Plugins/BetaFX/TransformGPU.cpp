@@ -277,268 +277,269 @@ static void inverseMatrix(float m[], float n[]) {
 
 void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
 {
-    if(!_isEnabledOpenCLRender) {
-    float mt0[9] = { m0[3],m0[4],m0[5],m0[6],m0[7],m0[8],m0[9],m0[10],m0[11] };
-    float mt1[9] = { m1[3],m1[4],m1[5],m1[6],m1[7],m1[8],m1[9],m1[10],m1[11] };
-    float pt0[3] = { m0[0], m0[1], m0[2] };
-    float pt1[3] = { m1[0], m1[1], m1[2] };
-    float mm0[9] = { m0[3],m0[4],m0[5],m0[6],m0[7],m0[8],m0[9],m0[10],m0[11] };
-    float mm1[9] = { m1[3],m1[4],m1[5],m1[6],m1[7],m1[8],m1[9],m1[10],m1[11] };
-    float p0[3] = { m0[0], m0[1], m0[2] };
-    float p1[3] = { m1[0], m1[1], m1[2] };
-    float mp0[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
-    float mp1[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
-    float mpt0[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
-    float mpt1[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
-    float pp0[3] = { 0.,0.,0. };
-    float pp1[3] = { 0.,0.,0. };
-    float bP[25] = {};
-    float mb0 = blur;
-    if (index != 0) {
-        float pParams[25];
-        for (int i = 0; i < 25; i++) {
-            pParams[i] = buffersCPU[now][index - 1][i];
+    if (!_isEnabledOpenCLRender) {
+        float mt0[9] = { m0[3],m0[4],m0[5],m0[6],m0[7],m0[8],m0[9],m0[10],m0[11] };
+        float mt1[9] = { m1[3],m1[4],m1[5],m1[6],m1[7],m1[8],m1[9],m1[10],m1[11] };
+        float pt0[3] = { m0[0], m0[1], m0[2] };
+        float pt1[3] = { m1[0], m1[1], m1[2] };
+        float mm0[9] = { m0[3],m0[4],m0[5],m0[6],m0[7],m0[8],m0[9],m0[10],m0[11] };
+        float mm1[9] = { m1[3],m1[4],m1[5],m1[6],m1[7],m1[8],m1[9],m1[10],m1[11] };
+        float p0[3] = { m0[0], m0[1], m0[2] };
+        float p1[3] = { m1[0], m1[1], m1[2] };
+        float mp0[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+        float mp1[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+        float mpt0[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+        float mpt1[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+        float pp0[3] = { 0.,0.,0. };
+        float pp1[3] = { 0.,0.,0. };
+        float bP[25] = {};
+        float mb0 = blur;
+        if (index != 0) {
+            float pParams[25];
+            for (int i = 0; i < 25; i++) {
+                pParams[i] = buffersCPU[now][index - 1][i];
+            }
+            pp0[0] = pParams[0];
+            pp0[1] = pParams[1];
+            pp0[2] = pParams[2];
+            mpt0[0] = pParams[3];
+            mpt0[1] = pParams[4];
+            mpt0[2] = pParams[5];
+            mpt0[3] = pParams[6];
+            mpt0[4] = pParams[7];
+            mpt0[5] = pParams[8];
+            mpt0[6] = pParams[9];
+            mpt0[7] = pParams[10];
+            mpt0[8] = pParams[11];
+            pp1[0] = pParams[12];
+            pp1[1] = pParams[13];
+            pp1[2] = pParams[14];
+            mpt1[0] = pParams[15];
+            mpt1[1] = pParams[16];
+            mpt1[2] = pParams[17];
+            mpt1[3] = pParams[18];
+            mpt1[4] = pParams[19];
+            mpt1[5] = pParams[20];
+            mpt1[6] = pParams[21];
+            mpt1[7] = pParams[22];
+            mpt1[8] = pParams[23];
+            mb0 += pParams[24];
+            crossMatrix(mt0, mpt0, mm0);
+            crossMatrix(mt1, mpt1, mm1);
+            inverseMatrix(mpt0, mp0);
+            inverseMatrix(mpt1, mp1);
+            getPos(pt0, mp0, p0);
+            getPos(pt1, mp1, p1);
         }
-        pp0[0] = pParams[0];
-        pp0[1] = pParams[1];
-        pp0[2] = pParams[2];
-        mpt0[0] = pParams[3];
-        mpt0[1] = pParams[4];
-        mpt0[2] = pParams[5];
-        mpt0[3] = pParams[6];
-        mpt0[4] = pParams[7];
-        mpt0[5] = pParams[8];
-        mpt0[6] = pParams[9];
-        mpt0[7] = pParams[10];
-        mpt0[8] = pParams[11];
-        pp1[0] = pParams[12];
-        pp1[1] = pParams[13];
-        pp1[2] = pParams[14];
-        mpt1[0] = pParams[15];
-        mpt1[1] = pParams[16];
-        mpt1[2] = pParams[17];
-        mpt1[3] = pParams[18];
-        mpt1[4] = pParams[19];
-        mpt1[5] = pParams[20];
-        mpt1[6] = pParams[21];
-        mpt1[7] = pParams[22];
-        mpt1[8] = pParams[23];
-        mb0 += pParams[24];
-        crossMatrix(mt0, mpt0, mm0);
-        crossMatrix(mt1, mpt1, mm1);
-        inverseMatrix(mpt0, mp0);
-        inverseMatrix(mpt1, mp1);
-        getPos(pt0, mp0, p0);
-        getPos(pt1, mp1, p1);
-    }
 
-    bP[0] = p0[0] + pp0[0];
-    bP[1] = p0[1] + pp0[1];
-    bP[2] = p0[2] + pp0[2];
-    bP[3] = mm0[0];
-    bP[4] = mm0[1];
-    bP[5] = mm0[2];
-    bP[6] = mm0[3];
-    bP[7] = mm0[4];
-    bP[8] = mm0[5];
-    bP[9] = mm0[6];
-    bP[10] = mm0[7];
-    bP[11] = mm0[8];
-    bP[12] = p1[0] + pp1[0];
-    bP[13] = p1[1] + pp1[1];
-    bP[14] = p1[2] + pp1[2];
-    bP[15] = mm1[0];
-    bP[16] = mm1[1];
-    bP[17] = mm1[2];
-    bP[18] = mm1[3];
-    bP[19] = mm1[4];
-    bP[20] = mm1[5];
-    bP[21] = mm1[6];
-    bP[22] = mm1[7];
-    bP[23] = mm1[8];
-    bP[24] = mb0;
+        bP[0] = p0[0] + pp0[0];
+        bP[1] = p0[1] + pp0[1];
+        bP[2] = p0[2] + pp0[2];
+        bP[3] = mm0[0];
+        bP[4] = mm0[1];
+        bP[5] = mm0[2];
+        bP[6] = mm0[3];
+        bP[7] = mm0[4];
+        bP[8] = mm0[5];
+        bP[9] = mm0[6];
+        bP[10] = mm0[7];
+        bP[11] = mm0[8];
+        bP[12] = p1[0] + pp1[0];
+        bP[13] = p1[1] + pp1[1];
+        bP[14] = p1[2] + pp1[2];
+        bP[15] = mm1[0];
+        bP[16] = mm1[1];
+        bP[17] = mm1[2];
+        bP[18] = mm1[3];
+        bP[19] = mm1[4];
+        bP[20] = mm1[5];
+        bP[21] = mm1[6];
+        bP[22] = mm1[7];
+        bP[23] = mm1[8];
+        bP[24] = mb0;
 
-    if (send != 0) {
-        for (int i = 0; i < 25; i++) {
-            buffersCPU[now][send - 1][i] = bP[i];
+        if (send != 0) {
+            for (int i = 0; i < 25; i++) {
+                buffersCPU[now][send - 1][i] = bP[i];
+            }
         }
-    }
-    float xWin = p_ProcWindow.x2 - p_ProcWindow.x1;
-    float yWin = p_ProcWindow.y2 - p_ProcWindow.y1;
-    float ratio = xWin / yWin;
-    double pi = 3.14159265358979323846;
+        float xWin = p_ProcWindow.x2 - p_ProcWindow.x1;
+        float yWin = p_ProcWindow.y2 - p_ProcWindow.y1;
+        float ratio = xWin / yWin;
+        float pi = 3.14159265358979323846;
 
-    for (int y = p_ProcWindow.y1; y < p_ProcWindow.y2; ++y)
-    {
-        if (_effect.abort()) break;
-
-        unsigned char* dstPix8 = static_cast<unsigned char*>(_dstImg->getPixelAddress(p_ProcWindow.x1, y));
-        float* dstPix32 = static_cast<float*>(_dstImg->getPixelAddress(p_ProcWindow.x1, y));
-
-        for (int x = p_ProcWindow.x1; x < p_ProcWindow.x2; ++x)
+        for (int y = p_ProcWindow.y1; y < p_ProcWindow.y2; ++y)
         {
+            if (_effect.abort()) break;
 
-            if (off == 1) {
-                float value[4] = { 0.,0.,0.,0. };
-                int bMax = (int)ceil(bP[24] * 32.);
-                bMax = bMax < 1 ? 1 : bMax;
-                float uv[2] = { 0,0 };
-                float plot[2] = { 0., 0. };
-                float plot1[2] = { 0., 0. };
-                float plot2[2] = { 0., 0. };
-                float d = 0., fac = 0.;
-                bool fwd, horizon;
+            unsigned char* dstPix8 = static_cast<unsigned char*>(_dstImg->getPixelAddress(p_ProcWindow.x1, y));
+            float* dstPix32 = static_cast<float*>(_dstImg->getPixelAddress(p_ProcWindow.x1, y));
 
-                for (int r = 0; r < 2; r++) {
-                    uv[0] = x / xWin;
-                    uv[1] = y / yWin;
-                    uv[0] -= 0.5;
-                    uv[1] -= 0.5;
-                    uv[0] *= ratio;
-                    double zA[3] = { 0., 0., 1. };
-                    double xA[3] = { 1., 0., 0. };
-                    double yA[3] = { 0., 1., 0. };
-                    double m[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
-                    double p[3] = { 0.,0.,1. };
-                    for (int i = 0; i < 9; i++) {
-                        m[i] = bP[3 + i] * (1. - r * bP[24]) + bP[15 + i] * r * bP[24];
-                    }
-                    for (int i = 0; i < 3; i++) {
-                        p[i] = bP[i] * (1. - r * bP[24]) + bP[12 + i] * r * bP[24]; //part 2 :O
-                    }
-                    double l1[3] = { p[0], p[1], (p[2] + 1.) };
-                    double l2[3] = { uv[0] + p[0], uv[1] + p[1], p[2] };		// = -0.5
-                    double l1t[3] = { l1[0],l1[1],l1[2] };
-                    double l2t[3] = { l2[0],l2[1],l2[2] };
-                    l1[0] = l1t[0] * m[0] + l1t[1] * m[1] + l1t[2] * m[2];
-                    l2[0] = l2t[0] * m[0] + l2t[1] * m[1] + l2t[2] * m[2];
-                    l1[1] = l1t[0] * m[3] + l1t[1] * m[4] + l1t[2] * m[5];
-                    l2[1] = l2t[0] * m[3] + l2t[1] * m[4] + l2t[2] * m[5];
-                    l1[2] = l1t[0] * m[6] + l1t[1] * m[7] + l1t[2] * m[8];
-                    l2[2] = l2t[0] * m[6] + l2t[1] * m[7] + l2t[2] * m[8];
-                    for (int i = 0; i < 3; i++) {
-                        d += zA[i] * (l2[i] - l1[i]);
-                    }
-                    for (int i = 0; i < 3; i++) {
-                        fac += zA[i] * l1[i];
-                    }
-                    fac = ((d > 0. ? (wZ == 1. ? 1. : 0.) : 0.) - fac) / d;
-                    fwd = front == 0 && d > 0.;
-                    horizon = fac < 0. || fwd;
-                    double uhh[2] = { 0., 0. };
-                    if (r == 0) {
-                        plot1[0] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * xA[0];
-                        plot1[1] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * yA[0];
-                        plot1[0] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * xA[1];
-                        plot1[1] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * yA[1];
-                    }
-                    else {
-                        plot2[0] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * xA[0];
-                        plot2[1] += (l1[0] + ((l2[0] - l1[0]) * fabs(fac))) * yA[0];
-                        plot2[0] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * xA[1];
-                        plot2[1] += (l1[1] + ((l2[1] - l1[1]) * fabs(fac))) * yA[1];
-                    }
-                }
-                for (int b = 1; b <= bMax; b++) {
-                    float rng = sin((index) * 112.9898f * b + 179.233f) * 43758.5453f;
-                    rng -= floor(rng);
-					rng += b - 1; 
-					rng /= bMax;
-                            plot[0] = plot1[0] * (1. - rng) - plot2[0] * rng;
-                            plot[1] = plot1[1] * (1. - rng) - plot2[1] * rng;
-                    plot[0] /= ratio;
-                    plot[0] += 0.5;
-                    plot[1] += 0.5;
-
-                    double tx = plot[0] * xWin;
-                    double ty = plot[1] * yWin;
-                    switch ((int)(wX)) {
-                    case 2:
-                        tx = tx - xWin * floor(tx / xWin);
-                        break;
-                    case 3:
-                        tx = xWin - fabs((tx - 2. * xWin * floor(tx / xWin / 2.)) - xWin);
-                    }
-                    switch ((int)(wY)) {
-                    case 2:
-                        ty = ty - yWin * floor(ty / yWin);
-                        break;
-                    case 3:
-                        ty = yWin - fabs((ty - 2. * yWin * floor(ty / yWin / 2.)) - yWin);
-                    }
-                    if (wX != 0) tx = fmin(fmax(tx, 0.), xWin - 1.);
-                    if (wY != 0) ty = fmin(fmax(ty, 0.), yWin - 1.);
-                    int ix = (int)floor(tx);
-                    int iy = (int)floor(ty);
-
-                    //mipped coords
-                    if (!horizon && (tx >= 0. && tx < xWin) && (ty >= 0. && ty < yWin))
-                    {
-                        tx = fmin(fmax(tx, 0.5), xWin - .5);
-                        ty = fmin(fmax(ty, 0.5), yWin - .5);
-                        const int index2 = (iy * xWin + ix) * 4;
-
-                        unsigned char* srcPix8 = static_cast<unsigned char*>(_srcImg ? _srcImg->getPixelAddress(ix, iy) : 0);
-                        float* srcPix32 = static_cast<float*>(_srcImg ? _srcImg->getPixelAddress(x, y) : 0);
-
-                        // do we have a source image to scale up
-                        if (bits == 8 && srcPix8) {
-                            value[0] += srcPix8[0] / bMax;
-                            value[1] += srcPix8[1] / bMax;
-                            value[2] += srcPix8[2] / bMax;
-                            value[3] += srcPix8[3] / bMax;
-                        }
-                        else if (bits == 32 && srcPix32) {
-                            value[0] += srcPix32[0] / bMax;
-                            value[1] += srcPix32[1] / bMax;
-                            value[2] += srcPix32[2] / bMax;
-                            value[3] += srcPix32[3] / bMax;
-                        }
-                    }
-                }
-                if (bits == 8) {
-                    value[0] = fmin(value[0], 255.0);
-                    value[1] = fmin(value[1], 255.0);
-                    value[2] = fmin(value[2], 255.0);
-                    value[3] = fmin(value[3], 255.0);
-                    dstPix8[0] = (unsigned char)(value[0]);
-                    dstPix8[1] = (unsigned char)(value[1]);
-                    dstPix8[2] = (unsigned char)(value[2]);
-                    dstPix8[3] = (unsigned char)(value[3]);
-                }
-                else {
-                    dstPix32[0] = (value[0]);
-                    dstPix32[1] = (value[1]);
-                    dstPix32[2] = (value[2]);
-                    dstPix32[3] = (value[3]);
-                }
-            }
-            else
+            for (int x = p_ProcWindow.x1; x < p_ProcWindow.x2; ++x)
             {
-                // no src pixel here, be black and transparent
-                for (int c = 0; c < 4; ++c)
-                {
+
+                if (off == 1) {
+                    float value[4] = { 0.,0.,0.,0. };
+                    int bMax = (int)ceil(bP[24] * 32.);
+                    bMax = bMax < 1 ? 1 : bMax;
+                    float uv[2] = { 0,0 };
+                    float plot[2] = { 0., 0. };
+                    float plot1[2] = { 0., 0. };
+                    float plot2[2] = { 0., 0. };
+                    float d = 0., fac = 0.;
+                    bool fwd, horizon;
+
+                    for (int r = 0; r < 2; r++) {
+                        d = 0, fac = 0.;
+                        uv[0] = x / xWin;
+                        uv[1] = y / yWin;
+                        uv[0] -= 0.5;
+                        uv[1] -= 0.5;
+                        uv[0] *= ratio;
+                        float zA[3] = { 0., 0., 1. };
+                        float xA[3] = { 1., 0., 0. };
+                        float yA[3] = { 0., 1., 0. };
+                        float m[9] = { 1.,0.,0.,0.,1.,0.,0.,0.,1. };
+                        float p[3] = { 0.,0.,1. };
+                        for (int i = 0; i < 9; i++) {
+                            m[i] = bP[3 + i] * (1. - r * bP[24]) + bP[15 + i] * r * bP[24];
+                        }
+                        for (int i = 0; i < 3; i++) {
+                            p[i] = bP[i] * (1. - r * bP[24]) + bP[12 + i] * r * bP[24]; //part 2 :O
+                        }
+                        float l1[3] = { p[0], p[1], (p[2] + 1.f) };
+                        float l2[3] = { uv[0] + p[0], uv[1] + p[1], p[2] };		// = -0.5
+                        float l1t[3] = { l1[0],l1[1],l1[2] };
+                        float l2t[3] = { l2[0],l2[1],l2[2] };
+                        l1[0] = l1t[0] * m[0] + l1t[1] * m[1] + l1t[2] * m[2];
+                        l2[0] = l2t[0] * m[0] + l2t[1] * m[1] + l2t[2] * m[2];
+                        l1[1] = l1t[0] * m[3] + l1t[1] * m[4] + l1t[2] * m[5];
+                        l2[1] = l2t[0] * m[3] + l2t[1] * m[4] + l2t[2] * m[5];
+                        l1[2] = l1t[0] * m[6] + l1t[1] * m[7] + l1t[2] * m[8];
+                        l2[2] = l2t[0] * m[6] + l2t[1] * m[7] + l2t[2] * m[8];
+                        for (int i = 0; i < 3; i++) {
+                            d += zA[i] * (l2[i] - l1[i]);
+                        }
+                        for (int i = 0; i < 3; i++) {
+                            fac += zA[i] * l1[i];
+                        }
+                        fac = ((d > 0. ? (wZ == 1. ? 1. : 0.) : 0.) - fac) / d;
+                        fwd = front == 0 && d > 0.;
+                        horizon = fac < 0. || fwd;
+                        float uhh[2] = { 0., 0. };
+                        if (r == 0) {
+                            for (int i = 0; i < 3; i++) {
+                                plot1[0] += (l1[i] + ((l2[i] - l1[i]) * fabs(fac))) * xA[i];
+                                plot1[1] += (l1[i] + ((l2[i] - l1[i]) * fabs(fac))) * yA[i];
+                            }
+                        }
+                        else {
+                            for (int i = 0; i < 3; i++) {
+                                plot2[0] += (l1[i] + ((l2[i] - l1[i]) * fabs(fac))) * xA[i];
+                                plot2[1] += (l1[i] + ((l2[i] - l1[i]) * fabs(fac))) * yA[i];
+                            }
+                        }
+                    }
+                    for (int b = 1; b <= bMax; b++) {
+                        float rng = (sin((x + y * xWin) * 112.9898f * b + 179.233f) *2. - 1.) * 43758.5453f;
+                        rng -= floor(rng);
+                        rng += b - 1;
+                        rng /= bMax;
+                        plot[0] = plot1[0] * (1. - rng) + plot2[0] * rng;
+                        plot[1] = plot1[1] * (1. - rng) + plot2[1] * rng;
+                        plot[0] /= ratio;
+                        plot[0] += 0.5;
+                        plot[1] += 0.5;
+
+                        float tx = plot[0] * xWin;
+                        float ty = plot[1] * yWin;
+                        switch ((int)(wX)) {
+                        case 2:
+                            tx = tx - xWin * floor(tx / xWin);
+                            break;
+                        case 3:
+                            tx = xWin - fabs((tx - 2. * xWin * floor(tx / xWin / 2.)) - xWin);
+                        }
+                        switch ((int)(wY)) {
+                        case 2:
+                            ty = ty - yWin * floor(ty / yWin);
+                            break;
+                        case 3:
+                            ty = yWin - fabs((ty - 2. * yWin * floor(ty / yWin / 2.)) - yWin);
+                        }
+                        if (wX != 0) tx = fmin(fmax(tx, 0.), xWin - 1.);
+                        if (wY != 0) ty = fmin(fmax(ty, 0.), yWin - 1.);
+                        int ix = (int)floor(tx);
+                        int iy = (int)floor(ty);
+
+                        //mipped coords
+                        if (!horizon && (tx >= 0. && tx < xWin) && (ty >= 0. && ty < yWin))
+                        {
+                            tx = fmin(fmax(tx, 0.5), xWin - .5);
+                            ty = fmin(fmax(ty, 0.5), yWin - .5);
+                            const int index2 = (iy * xWin + ix) * 4;
+
+                            unsigned char* srcPix8 = static_cast<unsigned char*>(_srcImg ? _srcImg->getPixelAddress(ix, iy) : 0);
+                            float* srcPix32 = static_cast<float*>(_srcImg ? _srcImg->getPixelAddress(x, y) : 0);
+
+                            // do we have a source image to scale up
+                            if (bits == 8 && srcPix8) {
+                                value[0] += srcPix8[0] / bMax;
+                                value[1] += srcPix8[1] / bMax;
+                                value[2] += srcPix8[2] / bMax;
+                                value[3] += srcPix8[3] / bMax;
+                            }
+                            else if (bits == 32 && srcPix32) {
+                                value[0] += srcPix32[0] / bMax;
+                                value[1] += srcPix32[1] / bMax;
+                                value[2] += srcPix32[2] / bMax;
+                                value[3] += srcPix32[3] / bMax;
+                            }
+                        }
+                    }
                     if (bits == 8) {
-                        dstPix8[0] = 0;
-                        dstPix8[1] = 0;
-                        dstPix8[2] = 0;
-                        dstPix8[3] = 0;
+                        value[0] = fmin(value[0], 255.0);
+                        value[1] = fmin(value[1], 255.0);
+                        value[2] = fmin(value[2], 255.0);
+                        value[3] = fmin(value[3], 255.0);
+                        dstPix8[0] = (unsigned char)(value[0]);
+                        dstPix8[1] = (unsigned char)(value[1]);
+                        dstPix8[2] = (unsigned char)(value[2]);
+                        dstPix8[3] = (unsigned char)(value[3]);
                     }
                     else {
-                        dstPix32[0] = 0.;
-                        dstPix32[1] = 0.;
-                        dstPix32[2] = 0.;
-                        dstPix32[3] = 0.;
+                        dstPix32[0] = (value[0]);
+                        dstPix32[1] = (value[1]);
+                        dstPix32[2] = (value[2]);
+                        dstPix32[3] = (value[3]);
                     }
                 }
-            }
+                else
+                {
+                    // no src pixel here, be black and transparent
+                    for (int c = 0; c < 4; ++c)
+                    {
+                        if (bits == 8) {
+                            dstPix8[0] = 0;
+                            dstPix8[1] = 0;
+                            dstPix8[2] = 0;
+                            dstPix8[3] = 0;
+                        }
+                        else {
+                            dstPix32[0] = 0.;
+                            dstPix32[1] = 0.;
+                            dstPix32[2] = 0.;
+                            dstPix32[3] = 0.;
+                        }
+                    }
+                }
 
-            // increment the dst pixel
-            dstPix8 += 4;
-            dstPix32 += 4;
+                // increment the dst pixel
+                dstPix8 += 4;
+                dstPix32 += 4;
+            }
         }
-        }
-        }
+    }
 }
 
 void DynamicTransform::setSrcImg(OFX::Image* p_SrcImg)
