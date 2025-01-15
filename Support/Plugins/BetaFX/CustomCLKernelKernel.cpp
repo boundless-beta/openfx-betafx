@@ -273,7 +273,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
 
         std::string bitStr = bits == 8 ? "uchar" : "float";
 
-        std::string kernelStart = "__kernel void customKernel(int p_Width, int p_Height, float kTime, float kFloat0, float kFloat1, float kFloat2, float kFloat3, float kFloat4, float kFloat5, float kFloat6, float kFloat7, float kFloat8, float kFloat9, float kFloat10, float kFloat11, float kFloat12, float kFloat13, float kFloat14, float kFloat15, __global " + bitStr + "* p_Input, __global " + bitStr + "* p_Output, __global float* kBuffer0, __global float* kBuffer1, __global float* kBuffer2, __global float* kBuffer3, __global float* kTransform, int kThread, int bits)\n" \
+        std::string kernelStart = "__kernel void customKernel(int p_Width, int p_Height, float kTime, float kFloat0, float kFloat1, float kFloat2, float kFloat3, float kFloat4, float kFloat5, float kFloat6, float kFloat7, float kFloat8, float kFloat9, float kFloat10, float kFloat11, float kFloat12, float kFloat13, float kFloat14, float kFloat15, __global " + bitStr + "* p_Input, __global " + bitStr + "* p_Output, __global float* kBuffer0, __global float* kBuffer1, __global float* kBuffer2, __global float* kBuffer3, __global float* kTransform, int kThread, int bits, volatile __global int* kAtoms)\n" \
             "{                                                                      \n" \
             "   const int x = get_global_id(0);                                     \n" \
             "   const int y = get_global_id(1);                                     \n" \
@@ -362,6 +362,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
     else {
         clEnqueueWriteBuffer(cmdQ, tBuffersCL, CL_TRUE, 0, 64 * 25 * 16 * sizeof(float), &buffers, 0, NULL, NULL);
     }
+        cl_mem bufferV = clCreateBuffer(clContext, CL_MEM_READ_WRITE, sizeof(int) * 16, NULL, NULL);
     if (bufferSize != p_Width * p_Height * 4 * sizeof(float) || !buffersCreated) {
         bufferSize = p_Width * p_Height * 4 * sizeof(float);
         buffer0 = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_READ_WRITE, 0);
@@ -399,6 +400,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
     error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &tBuffersCL);
     error |= clSetKernelArg(clKernel, count++, sizeof(int), &transformIndex);
     error |= clSetKernelArg(clKernel, count++, sizeof(int), &bits);
+    error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &bufferV);
 
     CheckError(error, "Unable to set kernel arguments");
 
@@ -409,6 +411,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
     globalWorkSize[1] = p_Height;
 
     clEnqueueNDRangeKernel(cmdQ, clKernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
+    clReleaseMemObject(bufferV);
 }
 template<class PIX>
 void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output)
@@ -456,7 +459,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
         std::string bitStr = bits == 8 ? "uchar" : "float";
 
         std::string kernelStart = "__constant sampler_t imageSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_LINEAR;  \n" \
-            "__kernel void customKernel(int p_Width, int p_Height, float kTime, float kFloat0, float kFloat1, float kFloat2, float kFloat3, float kFloat4, float kFloat5, float kFloat6, float kFloat7, float kFloat8, float kFloat9, float kFloat10, float kFloat11, float kFloat12, float kFloat13, float kFloat14, float kFloat15, __read_only image2d_t p_Input, __write_only image2d_t p_Output, __global float* kBuffer0, __global float* kBuffer1, __global float* kBuffer2, __global float* kBuffer3, __global float* kTransform, int kThread, int bits)\n" \
+            "__kernel void customKernel(int p_Width, int p_Height, float kTime, float kFloat0, float kFloat1, float kFloat2, float kFloat3, float kFloat4, float kFloat5, float kFloat6, float kFloat7, float kFloat8, float kFloat9, float kFloat10, float kFloat11, float kFloat12, float kFloat13, float kFloat14, float kFloat15, __read_only image2d_t p_Input, __write_only image2d_t p_Output, __global float* kBuffer0, __global float* kBuffer1, __global float* kBuffer2, __global float* kBuffer3, __global float* kTransform, int kThread, int bits, volatile __global int* kAtoms)\n" \
             "{                                                                      \n" \
             "   const int x = get_global_id(0);                                     \n" \
             "   const int y = get_global_id(1);                                     \n" \
@@ -478,7 +481,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
             const std::string kBx = kernThing.substr(kReadPos + 6, 1);
             std::string kReadB = "";
             if (kBx == "1" || kBx == "2" || kBx == "3" || kBx == "0") {
-                kReadB = kReadImage(std::stoi(kBx));
+                kReadB = kReadBuffer(std::stoi(kBx));
                 kernThing.replace(kReadPos, 8, kReadB);
             }
             else if (kBx == ")") {
@@ -492,7 +495,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
         while (kWritePos != std::string::npos) {
             const std::string kBx = kernThing.substr(kWritePos + 7, 1);
             if (kBx == "1" || kBx == "2" || kBx == "3" || kBx == "0") {
-                std::string kWriteB = kWriteImage(std::stoi(kBx));
+                std::string kWriteB = kWriteBuffer(std::stoi(kBx));
                 kernThing.replace(kWritePos, 9, kWriteB);
             }
             kWritePos = kernThing.find("kWrite(", kWritePos + 1);
@@ -544,6 +547,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
     else {
         clEnqueueWriteBuffer(cmdQ, tBuffersCL, CL_TRUE, 0, 64 * 25 * 16 * sizeof(float), &buffers, 0, NULL, NULL);
     }
+    cl_mem bufferV = clCreateBuffer(clContext, CL_MEM_READ_WRITE, sizeof(int) * 16, NULL, NULL);
     cl_image_format form;
     form.image_channel_order = CL_RGBA;
     form.image_channel_data_type = CL_FLOAT;
@@ -591,6 +595,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
     error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &tBuffersCL);
     error |= clSetKernelArg(clKernel, count++, sizeof(int), &transformIndex);
     error |= clSetKernelArg(clKernel, count++, sizeof(int), &bits);
+    error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &bufferV);
 
     //float mb, float xScale, float yScale, float zScale, float xRot, float yRot, float zRot, int pIndex, int pSend, int now, int off, int forward, __read_only image2d_t p_Input, __write_only image2d_t p_Output, __global 
     CheckError(error, "Unable to set kernel arguments");
@@ -602,6 +607,7 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
     globalWorkSize[1] = p_Height;
 
     clEnqueueNDRangeKernel(cmdQ, clKernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
+    clReleaseMemObject(bufferV);
 }
 
 template void RunOpenCLKernelBuffers<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const unsigned char* p_Input, unsigned char* p_Output);

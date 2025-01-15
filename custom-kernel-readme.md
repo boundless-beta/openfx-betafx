@@ -46,3 +46,5 @@ Below is a list of custom variables and their use in BetaFX Custom OpenCL Kernel
 
 **int kThread** *(experimental)*: used in **BetaFX Dynamic Transform** to avoid flickering on multithread setups; required for properly reading **kTransform**
 
+**int kAtoms[16]** *(experimental)*: array of volatile integers compatible with atomic functions, useful for things like image queries
+
