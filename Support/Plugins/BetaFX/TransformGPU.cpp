@@ -480,20 +480,20 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
                             const int index2 = (iy * xWin + ix) * 4;
 
                             unsigned char* srcPix8 = static_cast<unsigned char*>(_srcImg ? _srcImg->getPixelAddress(ix, iy) : 0);
-                            float* srcPix32 = static_cast<float*>(_srcImg ? _srcImg->getPixelAddress(x, y) : 0);
+                            float* srcPix32 = static_cast<float*>(_srcImg ? _srcImg->getPixelAddress(ix, iy) : 0);
 
                             // do we have a source image to scale up
                             if (bits == 8 && srcPix8) {
-                                value[0] += srcPix8[0] / bMax;
-                                value[1] += srcPix8[1] / bMax;
-                                value[2] += srcPix8[2] / bMax;
-                                value[3] += srcPix8[3] / bMax;
+                                value[0] += srcPix8[0] / (float)bMax;
+                                value[1] += srcPix8[1] / (float)bMax;
+                                value[2] += srcPix8[2] / (float)bMax;
+                                value[3] += srcPix8[3] / (float)bMax;
                             }
                             else if (bits == 32 && srcPix32) {
-                                value[0] += srcPix32[0] / bMax;
-                                value[1] += srcPix32[1] / bMax;
-                                value[2] += srcPix32[2] / bMax;
-                                value[3] += srcPix32[3] / bMax;
+                                value[0] += srcPix32[0] / (float)bMax;
+                                value[1] += srcPix32[1] / (float)bMax;
+                                value[2] += srcPix32[2] / (float)bMax;
+                                value[3] += srcPix32[3] / (float)bMax;
                             }
                         }
                     }
