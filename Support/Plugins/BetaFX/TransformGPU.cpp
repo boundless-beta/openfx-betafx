@@ -1116,7 +1116,7 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     for (int i = 0; i < INSTANCE_COUNT; i++) {
         instanceStarted[i] = 0;
     }
-    int thisThread = threadQuery(std::this_thread::get_id());
+    int thisThread = instanceHandle;
     transformIndex = thisThread;
     int instanceIndex = instanceHandle % INSTANCE_COUNT;
 
