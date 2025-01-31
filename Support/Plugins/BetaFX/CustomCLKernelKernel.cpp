@@ -33,53 +33,6 @@ cl_mem buffer2;
 cl_mem buffer3;
 cl_mem tBuffersCL;
 
-class Locker
-{
-public:
-    Locker()
-    {
-#ifdef _WIN64
-        InitializeCriticalSection(&mutex);
-#else
-        pthread_mutex_init(&mutex, NULL);
-#endif
-    }
-
-    ~Locker()
-    {
-#ifdef _WIN64
-        DeleteCriticalSection(&mutex);
-#else
-        pthread_mutex_destroy(&mutex);
-#endif
-    }
-
-    void Lock()
-    {
-#ifdef _WIN64
-        EnterCriticalSection(&mutex);
-#else
-        pthread_mutex_lock(&mutex);
-#endif
-    }
-
-    void Unlock()
-    {
-#ifdef _WIN64
-        LeaveCriticalSection(&mutex);
-#else
-        pthread_mutex_unlock(&mutex);
-#endif
-    }
-
-private:
-#ifdef _WIN64
-    CRITICAL_SECTION mutex;
-#else
-    pthread_mutex_t mutex;
-#endif
-};
-
 const char* fallbackKernel = "kReadIndex = (float2)(x, y); ";
 cl_context clContext = NULL;
 

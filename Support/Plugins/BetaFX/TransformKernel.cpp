@@ -458,52 +458,7 @@ const char *KernelSourceImages = "\n" \
 "\n";
 */
 
-class Locker
-{
-public:
-    Locker()
-    {
-#ifdef _WIN64
-        InitializeCriticalSection(&mutex);
-#else
-        pthread_mutex_init(&mutex, NULL);
-#endif
-    }
 
-    ~Locker()
-    {
-#ifdef _WIN64
-        DeleteCriticalSection(&mutex);
-#else
-        pthread_mutex_destroy(&mutex);
-#endif
-    }
-
-    void Lock()
-    {
-#ifdef _WIN64
-        EnterCriticalSection(&mutex);
-#else
-        pthread_mutex_lock(&mutex);
-#endif
-    }
-
-    void Unlock()
-    {
-#ifdef _WIN64
-        LeaveCriticalSection(&mutex);
-#else
-        pthread_mutex_unlock(&mutex);
-#endif
-    }
-
-private:
-#ifdef _WIN64
-    CRITICAL_SECTION mutex;
-#else
-    pthread_mutex_t mutex;
-#endif
-};
 template<class PIX>
 void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output)
 {
@@ -560,10 +515,10 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, 
         kernel = kernelMap[cmdQ];
     }
 
-    locker.Unlock();
     if (clGetMemObjectInfo(buffersCL, CL_MEM_SIZE, sizeof(int), NULL, NULL) != 0) {
         buffersCL = clCreateBuffer(clContext, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, 64 * 25 * 16 * sizeof(float), &buffers, NULL);
     }
+    locker.Unlock();
 
     int count = 0;
     error = clSetKernelArg(kernel, count++, sizeof(int), &p_Width);
@@ -621,8 +576,12 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, 
     globalWorkSize[1] = p_Height;
 
     clEnqueueNDRangeKernel(cmdQ, kernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
-    if (send != 0) clEnqueueReadBuffer(cmdQ, buffersCL, CL_TRUE, sizeof(float) * (index * 25 * 16 + (send - 1) * 25), sizeof(float) * 25, buffers, 0, NULL, NULL);
-    clReleaseMemObject(buffersCL);
+    if (send != 0) {
+        locker.Lock();
+        clEnqueueReadBuffer(cmdQ, buffersCL, CL_TRUE, sizeof(float) * (index * 25 * 16 + (send - 1) * 25), sizeof(float) * 25, buffers, 0, NULL, NULL);
+        locker.Unlock();
+    }
+    // clReleaseMemObject(buffersCL);
 }
 template<class PIX>
 void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output)
@@ -741,7 +700,11 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, f
     globalWorkSize[1] = p_Height;
 
     clEnqueueNDRangeKernel(cmdQ, kernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
-    if (send != 0) clEnqueueReadBuffer(cmdQ, buffersCL, CL_TRUE, sizeof(float) * (index * 25 * 16 + (send - 1) * 25), sizeof(float) * 25, buffers, 0, NULL, NULL);
+    if (send != 0) {
+        locker.Lock();
+        clEnqueueReadBuffer(cmdQ, buffersCL, CL_TRUE, sizeof(float) * (index * 25 * 16 + (send - 1) * 25), sizeof(float) * 25, buffers, 0, NULL, NULL);
+        locker.Unlock();
+    }
     // clReleaseMemObject(buffersCL);
 }
 

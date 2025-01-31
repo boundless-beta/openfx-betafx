@@ -18,6 +18,8 @@
 #include "ofxsProcessing.h"
 #include "ofxsLog.h"
 
+#include "BetaFXCommon.h"
+
 #define kPluginName "BetaFX Dynamic Transform"
 #define kPluginGrouping "BetaFX"
 #define kPluginDescription "Transform an image using various static and animated parameters"
@@ -357,11 +359,13 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
         bP[22] = mm1[7];
         bP[23] = mm1[8];
         bP[24] = mb0;
-
         if (send != 0) {
+            static Locker lockey;
+            lockey.Lock();
             for (int i = 0; i < 25; i++) {
                 buffersCPU[now][send - 1][i] = bP[i];
             }
+            lockey.Unlock();
         }
         float xWin = p_ProcWindow.x2 - p_ProcWindow.x1;
         float yWin = p_ProcWindow.y2 - p_ProcWindow.y1;
@@ -724,11 +728,14 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
             g = 1.;
         }
     }
+    static Locker lockes;
+    lockes.Lock();
     if (isWiggle) {
         lastRateW[index] = p;
     } else {
         lastRate[index] = p;
     }
+    lockes.Unlock();
     if (offset > 8) {
         r = (g * d) * 60. / fr;
         p += r;
@@ -787,9 +794,12 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
         elast = b->getValueAtTime(i);
         bounc = bounce->getValueAtTime(i);
     }
+    static Locker lockes;
+    lockes.Lock();
     lastValue[index] = result;
     lastValue2[index] = value0;
     lastVel[index] = vel;
+    lockes.Unlock();
     if (offset > 8) {
         value = param->getValueAtTime(timeOut + 1.);
         tempo = a->getValueAtTime(timeOut + 1.);
@@ -1096,6 +1106,8 @@ void TransformGPU::render(const OFX::RenderArguments& p_Args)
 
 void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const OFX::RenderArguments& p_Args)
 {
+
+    static Locker locken;
     double PI = 3.14159265358979323846;
     // Get the dst image
     std::unique_ptr<OFX::Image> dst(m_DstClip->fetchImage(p_Args.time));
@@ -1116,7 +1128,7 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     for (int i = 0; i < INSTANCE_COUNT; i++) {
         instanceStarted[i] = 0;
     }
-    int thisThread = instanceHandle;
+    int thisThread = 0; // this variable is pointless
     transformIndex = thisThread;
     int instanceIndex = instanceHandle % INSTANCE_COUNT;
 
@@ -1262,8 +1274,9 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
         px0 *= ratio;
         px1 *= ratio;
     }
-
+    locken.Lock();
     lastTime[instanceIndex] = p_Args.time;
+    locken.Unlock();
     // parameters end here
 
     // matrix math
@@ -1290,7 +1303,12 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     if (pIndex != 0) {
         float pParams[25];
         for (int i = 0; i < 25; i++) {
-            pParams[i] = buffers[thisThread][pIndex - 1][i];
+            if (!p_Args.isEnabledOpenCLRender) {
+                pParams[i] = buffersCPU[thisThread][pIndex - 1][i];
+            }
+            else {
+                pParams[i] = buffers[thisThread][pIndex - 1][i];
+            }
         }
         pp0[0] = pParams[0];
         pp0[1] = pParams[1];
