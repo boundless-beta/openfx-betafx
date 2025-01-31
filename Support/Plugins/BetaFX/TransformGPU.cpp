@@ -1303,10 +1303,7 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     if (pIndex != 0) {
         float pParams[25];
         for (int i = 0; i < 25; i++) {
-            if (!p_Args.isEnabledOpenCLRender) {
-                pParams[i] = buffersCPU[thisThread][pIndex - 1][i];
-            }
-            else {
+            if (p_Args.isEnabledOpenCLRender) {
                 pParams[i] = buffers[thisThread][pIndex - 1][i];
             }
         }
