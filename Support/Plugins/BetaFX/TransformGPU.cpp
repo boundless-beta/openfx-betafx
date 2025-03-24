@@ -589,7 +589,7 @@ void DynamicTransform::setScales(double m0x, double m0y, double m0z, double m00,
     angles[2] = zRot;
     index = pIndex;
     send = pSend;
-    now = thisThread;
+    now = 0;
     off = toggle;
     front = forward;
     bits = bitDepth;

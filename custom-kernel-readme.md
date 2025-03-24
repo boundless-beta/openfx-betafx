@@ -37,14 +37,14 @@ Below is a list of custom variables and their use in BetaFX Custom OpenCL Kernel
 
 **float\* kTransform** *(experimental)*: buffer containing transform matrix values sent from **BetaFX Dynamic Transform**, not the parameters used (not very useful by itself)
 
-- size: 64 * 16 * 25 (thread, channel, parameter)
+- size: 16 * 25 (channel, parameter)
 - of the 25 parameters:
    - 0 - 2: position XYZ
    - 3 - 11: 3x3 transform matrix
    - 12-23: same as 0-11 but one frame ahead (used for motion blur)
    - 24: motion blur amount
 
-**int kThread** *(experimental)*: used in **BetaFX Dynamic Transform** to avoid flickering on multithread setups; required for properly reading **kTransform**
+**int kThread** *(obsolete)*: used in **BetaFX Dynamic Transform** to avoid flickering on multithread setups; was required for properly reading **kTransform**
 
 **int kAtoms[16]** *(experimental)*: array of volatile integers compatible with atomic functions, useful for things like image queries
 
