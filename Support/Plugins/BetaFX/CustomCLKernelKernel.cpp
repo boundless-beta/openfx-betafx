@@ -63,7 +63,7 @@ static std::string kReadBuffer(int index) {
     // else {
     return "\n" \
         "rIndex = ((int)kReadIndex.x + (int)kReadIndex.y * p_Width) * 4;         \n" \
-        "if(rIndex >= 0 && rIndex < p_Width * p_Height * 4) {         \n" \
+        "if(fmin(kReadIndex.x,kReadIndex.y) >= 0 && kReadIndex.x < p_Width && kReadIndex.y < p_Height) {         \n" \
         "kOutput.x = " + buff + "[rIndex + 0]; \n" \
         "kOutput.y = " + buff + "[rIndex + 1];\n" \
         "kOutput.z = " + buff + "[rIndex + 2];\n" \
@@ -97,7 +97,7 @@ static std::string kReadBuffer(int index) {
     // else {
     return "\n" \
         "rIndex = ((int)kReadIndex.x + (int)kReadIndex.y * p_Width) * 4;         \n" \
-        "if(rIndex >= 0 && rIndex < p_Width * p_Height * 4) {         \n" \
+        "if(fmin(kReadIndex.x,kReadIndex.y) >= 0 && kReadIndex.x < p_Width && kReadIndex.y < p_Height) {         \n" \
         "kOutput = read_imagef(" + buff + ", imageSampler, kReadIndex); \n" \
         "} else {\n" \
         "kOutput = (float4)0; \n" \
@@ -232,16 +232,16 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
             "   const int y = get_global_id(1);                                     \n" \
             "   const int index = ((y * p_Width) + x) * 4;         \n" \
             "   int rIndex; \n" \
-            "   float4 kOutput(0,0,0,0);                                           \n" \
-            "   float2 kReadIndex(0,0);                                           \n" \
+            "   float4 kOutput = (float4)(0,0,0,0);                                           \n" \
+            "   float2 kReadIndex = (float2)(0,0);                                           \n" \
             "   if ((x < p_Width) && (y < p_Height))                                \n" \
             "   {                                                                   \n";
         std::string kernelEnd = "                                                                       \n" \
             "				if (bits == 8) {                                                                                                     \n"\
-            "					kOutput.x = fmin(kOutput.x, 255.0);                                                                                 \n"\
-            "					kOutput.y = fmin(kOutput.y, 255.0);                                                                                 \n"\
-            "					kOutput.z = fmin(kOutput.z, 255.0);                                                                                 \n"\
-            "					kOutput.w = fmin(kOutput.w, 255.0);                                                                                 \n"\
+            "					kOutput.x = fmin(kOutput.x, 255.f);                                                                                 \n"\
+            "					kOutput.y = fmin(kOutput.y, 255.f);                                                                                 \n"\
+            "					kOutput.z = fmin(kOutput.z, 255.f);                                                                                 \n"\
+            "					kOutput.w = fmin(kOutput.w, 255.f);                                                                                 \n"\
             "				}                                                                                 \n"\
             "       p_Output[index + 0] = kOutput.x;             \n" \
             "       p_Output[index + 1] = kOutput.y;             \n" \
@@ -280,12 +280,13 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
         char* kernStr = new char[kernThing.length() + 1];
         strcpy(kernStr, kernThing.c_str());
         cl_program program = clCreateProgramWithSource(clContext, 1, (const char**)&kernStr, NULL, &error);
+        error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
         CheckError(error, "Unable to create program");
         if (error != CL_SUCCESS) {
-            error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
             char errorInfo[65536];
             error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
-            kernThing = kernelStart + fallbackKernel + kReadBuffer(-1) + + "kOutput.yz *= (float2)0.5; " + kernelEnd;
+            error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+            kernThing = kernelStart + fallbackKernel + kReadBuffer(-1) + "kOutput.yz *= (float2)0.5; " + kernelEnd;
 
             char* kernStrf = new char[kernThing.length() + 1];
             strcpy(kernStrf, kernThing.c_str());
@@ -295,6 +296,9 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
             if (errorLog) MessageBox(NULL, errorInfo, "BetaFX Custom OpenCL Kernel: compile error", MB_OK | MB_SETFOREGROUND | MB_ICONEXCLAMATION);
 #endif
         }
+        
+        kernelStrings[instance] = kernel;
+
 
         CheckError(error, "Unable to build program");
 
@@ -487,7 +491,6 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
 
         kernelMap[instance] = clKernel;
         clReleaseProgram(program);
-        kernelStrings[instance] = kernel;
     }
     else if (kernelMap.find(instance) != kernelMap.end())
     {

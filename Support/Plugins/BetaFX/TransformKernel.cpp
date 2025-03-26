@@ -26,7 +26,10 @@ cl_mem buffersCL;
 
 const char* KernelSourceBuffers = "\n" \
 "__kernel void transformBuffers(int p_Width, int p_Height, float m0x, float m0y, float m0z, float m00, float m01, float m02, float m03, float m04, float m05, float m06, float m07, float m08, float m1x, float m1y, float m1z, float m10, float m11, float m12, float m13, float m14, float m15, float m16, float m17, float m18, int p_wX, int p_wY, int p_wZ, float mb, float xScale, float yScale, float zScale, float xRot, float yRot, float zRot, int pIndex, int pSend, int now, int off, int forward, __global void* p_Input, __global void* p_Output, __global float* buffers, int bits)\n"\
-
+"{\n"\
+"	int index = get_global_id(0) + get_global_id(1) * p_Width;                                                                       \n"\
+"			int x = index % p_Width;                                                                                                 \n"\
+"			int y = index / p_Width;                                                                                                 \n"\
 "	if (pSend != 0) {                                                                                                                \n"\
 "	int ss = (pSend - 1)*25;                                                                                                          \n"\
 "	    buffers[ss+0] = m0x;                                                                                                          \n"\
@@ -59,13 +62,10 @@ const char* KernelSourceBuffers = "\n" \
 "	float yWin = p_Height;                                                                                                           \n"\
 "	float ratio = xWin / yWin;                                                                                                       \n"\
 "	float pi = 3.14159265358979323846;                                                                                              \n"\
-"	int index = get_global_id(0) + get_global_id(1) * p_Width;                                                                       \n"\
-"			int x = index % p_Width;                                                                                                 \n"\
-"			int y = index / p_Width;                                                                                                 \n"\
 "	if (index < p_Width * p_Height) {                                                                                                \n"\
 "		if (off == 1) {                                                                                                              \n"\
-"			float4 value(0,0,0,0);                                                                                           \n"\
-"			int bMax = ceil(bP[24] * 32.);                                                                                         \n"\
+"			float4 value = (float4)(0,0,0,0);                                                                                           \n"\
+"			int bMax = ceil(mb * 32.);                                                                                         \n"\
 "			bMax = bMax < 1 ? 1 : bMax;                                                                                            \n"\
 "			float2 uv;                                                                                                               \n"\
 "				float2 plot = (float2)(0., 0.);                                                                                                 \n"\
@@ -118,28 +118,30 @@ const char* KernelSourceBuffers = "\n" \
 "					plot2 += (float2)0.5;                                                                 \n"\
 "					}                                                                 \n"\
 "					}                                                                 \n"\
-"			for (int b = 1; b <= bMax; b++) {                                                                         \n"\
-"					float rng = fract(sin((index)*112.9898f*b + 179.233f) * 43758.5453f, &rng); \n"\
+"			for (int b = 1; b <= bMax; b++) {                                 \n"\
+"			    if(mb > 0) {                                                                         \n"\
+"					float rng = sin((index)*112.9898*b + 179.233) * 43758.5453; \n"\
+"					rng -= floor(rng); \n"\
 "					rng += b - 1; \n"\
 "					rng /= bMax; \n"\
 "						plot.x = plot1.x * (1. - rng) + plot2.x * rng;                                                               \n"\
 "						plot.y = plot1.y * (1. - rng) + plot2.y * rng;                                                               \n"\
-"				plot.x /= ratio;                                                                                                     \n"\
-"				plot.x += 0.5;                                                                                                       \n"\
-"				plot.y += 0.5;                                                                                                       \n"\
-"                                                                                                                                    \n"\
+"					} else {                                                                                                         \n"\
+"						plot = plot1;                                                                                            \n"\
+"					}                                                                                                         \n"\
 "							float tx = plot.x * xWin;                                                                               \n"\
 "							float ty = plot.y * yWin;                                                                               \n"\
+"                                                                                                                                    \n"\
 "							switch ((int)(p_wX)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
-"								tx = tx - xWin * floor(tx / xWin);                                                                   \n"\
+"								tx -= xWin * floor(tx / xWin);                                                                   \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
 "								tx = xWin - fabs((tx - 2. * xWin * floor(tx / xWin / 2.)) - xWin);                                    \n"\
 "							}                                                                                                        \n"\
 "							switch ((int)(p_wY)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
-"								ty = ty - yWin * floor(ty / yWin);                                                                   \n"\
+"								ty -= yWin * floor(ty / yWin);                                                                   \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
 "								ty = yWin - fabs((ty - 2. * yWin * floor(ty / yWin / 2.)) - yWin);                                    \n"\
@@ -149,7 +151,6 @@ const char* KernelSourceBuffers = "\n" \
 "							int ix = (int)floor(tx);                                                                                 \n"\
 "							int iy = (int)floor(ty);                                                                                 \n"\
 "                                                                                                                                    \n"\
-"							bool horizon = fac < 0. || fwd;                                                                          \n"\
 "							if (!horizon && (tx >= 0. && tx < xWin) && (ty >= 0. && ty < yWin))                                              \n"\
 "							{                                                                                                        \n"\
 "							    tx += 0.5;                                                                                                        \n"\
@@ -158,35 +159,47 @@ const char* KernelSourceBuffers = "\n" \
 "							    ty = ty < 0. ? 0. : (ty > yWin - 1. ? yWin - 1. : ty);                                    \n"\
 "								const int index2 = (iy * xWin + ix) * 4;                                                \n"\
 "								if(bits == 8) {                                                                                      \n"\
-"								value.x += (__global unsigned char*)(p_Input[index2 + 0]) / bMax;              \n"\
-"								value.y += (__global unsigned char*)(p_Input[index2 + 1]) / bMax;              \n"\
-"								value.z += (__global unsigned char*)(p_Input[index2 + 2]) / bMax;              \n"\
-"								value.w += (__global unsigned char*)(p_Input[index2 + 3]) / bMax;              \n"\
+"								value.x += ((__global unsigned char*)p_Input)[index2 + 0] / bMax;              \n"\
+"								value.y += ((__global unsigned char*)p_Input)[index2 + 1] / bMax;              \n"\
+"								value.z += ((__global unsigned char*)p_Input)[index2 + 2] / bMax;              \n"\
+"								value.w += ((__global unsigned char*)p_Input)[index2 + 3] / bMax;              \n"\
 "							} else {                                                                                                 \n"\
-"								value.x += (__global float*)(p_Input[index2 + 0]) / bMax;                      \n"\
-"								value.y += (__global float*)(p_Input[index2 + 1]) / bMax;                      \n"\
-"								value.z += (__global float*)(p_Input[index2 + 2]) / bMax;                      \n"\
-"								value.w += (__global float*)(p_Input[index2 + 3]) / bMax;                      \n"\
+"								value.x += ((__global float*)p_Input)[index2 + 0] / bMax;                      \n"\
+"								value.y += ((__global float*)p_Input)[index2 + 1] / bMax;                      \n"\
+"								value.z += ((__global float*)p_Input)[index2 + 2] / bMax;                      \n"\
+"								value.w += ((__global float*)p_Input)[index2 + 3] / bMax;                      \n"\
 "							}                                                                                                        \n"\
 "					    }                                                                                                              \n"\
 "			}                                                                                                                        \n"\
 "				if (bits == 8) {                                                                                                     \n"\
-"					value[0] = fmin(value[0], 255.0);                                                                                 \n"\
-"					value[1] = fmin(value[1], 255.0);                                                                                 \n"\
-"					value[2] = fmin(value[2], 255.0);                                                                                 \n"\
-"					value[3] = fmin(value[3], 255.0);                                                                                 \n"\
-"				    (__global unsigned char*)p_Output[index*4 + 0] = (unsigned char)(value.x);                                       \n"\
-"				    (__global unsigned char*)p_Output[index*4 + 1] = (unsigned char)(value.y);                                       \n"\
-"				    (__global unsigned char*)p_Output[index*4 + 2] = (unsigned char)(value.z);                                       \n"\
-"				    (__global unsigned char*)p_Output[index*4 + 3] = (unsigned char)(value.w);                                       \n"\
+"					value.x = fmin(value.x, 255.f);                                                                                 \n"\
+"					value.y = fmin(value.y, 255.f);                                                                                 \n"\
+"					value.z = fmin(value.z, 255.f);                                                                                 \n"\
+"					value.w = fmin(value.w, 255.f);                                                                                 \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 0] = (unsigned char)(value.x);                                       \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 1] = (unsigned char)(value.y);                                       \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 2] = (unsigned char)(value.z);                                       \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 3] = (unsigned char)(value.w);                                       \n"\
 "				} else {                                                                                                             \n"\
-"				    (__global float*)p_Output[index*4 + 0] = (value.x);                                                              \n"\
-"				    (__global float*)p_Output[index*4 + 1] = (value.y);                                                              \n"\
-"				    (__global float*)p_Output[index*4 + 2] = (value.z);                                                              \n"\
-"				    (__global float*)p_Output[index*4 + 3] = (value.w);                                                              \n"\
+"				    ((__global float*)p_Output)[index*4 + 0] = (value.x);                                                              \n"\
+"				    ((__global float*)p_Output)[index*4 + 1] = (value.y);                                                              \n"\
+"				    ((__global float*)p_Output)[index*4 + 2] = (value.z);                                                              \n"\
+"				    ((__global float*)p_Output)[index*4 + 3] = (value.w);                                                              \n"\
 "			    }                                                                                                                    \n"\
+"				} else {                                                                                                             \n"\
+"				if (bits == 8) {                                                                                                     \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 0] = ((__global unsigned char*)p_Input)[index*4 + 0];                              \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 1] = ((__global unsigned char*)p_Input)[index*4 + 1];                              \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 2] = ((__global unsigned char*)p_Input)[index*4 + 2];                              \n"\
+"				    ((__global unsigned char*)p_Output)[index*4 + 3] = ((__global unsigned char*)p_Input)[index*4 + 3];                              \n"\
+"				} else {                                                                                                             \n"\
+"				    ((__global float*)p_Output)[index*4 + 0] = ((__global float*)p_Input)[index*4 + 0];                              \n"\
+"				    ((__global float*)p_Output)[index*4 + 1] = ((__global float*)p_Input)[index*4 + 1];                              \n"\
+"				    ((__global float*)p_Output)[index*4 + 2] = ((__global float*)p_Input)[index*4 + 2];                              \n"\
+"				    ((__global float*)p_Output)[index*4 + 3] = ((__global float*)p_Input)[index*4 + 3];                              \n"\
+"}                                                                                                                                   \n"\
 "		}                                                                                                                            \n"\
-"	}                                                                                                                                \n"\
+"}                                                                                                                                   \n"\
 "}                                                                                                                                   \n"\
 "\n";
 
@@ -408,13 +421,12 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, 
         CheckError(error, "Unable to create program");
 
         error = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
+        char errorInfo[65536];
+        error = clGetProgramBuildInfo(program, deviceId, CL_PROGRAM_BUILD_LOG, sizeof(char) * 65536, &errorInfo, NULL);
         CheckError(error, "Unable to build program");
 
         kernel = clCreateKernel(program, "transformBuffers", &error);
         CheckError(error, "Unable to create kernel");
-
-        mipKernel = clCreateKernel(program, "createMippy", &error);
-        CheckError(error, "Unable to create mip kernel");
 
         kernelMap[cmdQ] = kernel;
     }
