@@ -13,6 +13,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdexcept>
+#include <cstring>
 
 #define CL_TARGET_OPENCL_VERSION 300
 #ifdef __APPLE__
