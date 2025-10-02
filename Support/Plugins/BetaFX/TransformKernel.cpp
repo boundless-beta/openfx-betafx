@@ -62,37 +62,37 @@ const char* KernelSourceBuffers = "\n" \
 "	float xWin = p_Width;                                                                                                            \n"\
 "	float yWin = p_Height;                                                                                                           \n"\
 "	float ratio = xWin / yWin;                                                                                                       \n"\
-"	float pi = 3.14159265358979323846;                                                                                              \n"\
+"	float pi = 3.14159265358979323846f;                                                                                              \n"\
 "	if (index < p_Width * p_Height) {                                                                                                \n"\
 "		if (off == 1) {                                                                                                              \n"\
 "			float4 value = (float4)(0,0,0,0);                                                                                           \n"\
-"			int bMax = ceil(mb * 32.);                                                                                         \n"\
+"			int bMax = (int)ceil(mb * 32.f);                                                                                         \n"\
 "			bMax = bMax < 1 ? 1 : bMax;                                                                                            \n"\
 "			float2 uv;                                                                                                               \n"\
-"				float2 plot = (float2)(0., 0.);                                                                                                 \n"\
-"				float2 plot1 = (float2)(0., 0.);                                                                                                 \n"\
-"				float2 plot2 = (float2)(0., 0.);                                                                                                 \n"\
-"				float d = 0., fac = 0.;                                                                                              \n"\
+"				float2 plot = (float2)(0.f, 0.f);                                                                                                 \n"\
+"				float2 plot1 = (float2)(0.f, 0.f);                                                                                                 \n"\
+"				float2 plot2 = (float2)(0.f, 0.f);                                                                                                 \n"\
+"				float d = 0.f, fac = 0.f;                                                                                              \n"\
 "				bool horizon, fwd;                                                                                              \n"\
 "				int rTimes = mb > 0 ? 2 : 1;                                                                                              \n"\
 "					for(int r = 0; r < rTimes; r++) {                                                                                                \n"\
 "					uv.x = x / xWin;                                                                                                \n"\
 "					uv.y = y / yWin;                                                                                                \n"\
-"					uv.x -= 0.5;                                                                                                     \n"\
-"					uv.y -= 0.5;                                                                                                     \n"\
+"					uv.x -= 0.5f;                                                                                                     \n"\
+"					uv.y -= 0.5f;                                                                                                     \n"\
 "					uv.x *= ratio;                                                                                                   \n"\
-"					float3 zA = (float3)(0., 0., 1.);                                                                                           \n"\
-"					float3 xA = (float3)(1., 0., 0.);                                                                                           \n"\
-"					float3 yA = (float3)(0., 1., 0.);                                                                                           \n"\
-"					float3 mm1 = (float3)(1.,0.,0.);                                                                    \n"\
-"					float3 mm2 = (float3)(0.,1.,0.);                                                                    \n"\
-"					float3 mm3 = (float3)(0.,0.,1.);                                                                    \n"\
-"					float3 p = (float3)(0.,0.,1.);                                                                                      \n"\
-"						mm1 = (float3)(m00,m01,m02) * (float3)(1. - r * mb) + (float3)(m10,m11,m12) * (float3)(r * mb);                                              \n"\
-"						mm2 = (float3)(m03,m04,m05) * (float3)(1. - r * mb) + (float3)(m13,m14,m15) * (float3)(r * mb);                                              \n"\
-"						mm3 = (float3)(m06,m07,m08) * (float3)(1. - r * mb) + (float3)(m16,m17,m18) * (float3)(r * mb);                                              \n"\
-"						p = (float3)(m0x,m0y,m0z) * (float3)(1. - r * mb) + (float3)(m1x,m1y,m1z) * (float3)(r * mb); //part 2 :O                                      \n"\
-"					float3 l1 = (float3)(p.xy, (p.z + 1.));                                                                      \n"\
+"					float3 zA = (float3)(0.f, 0.f, 1.f);                                                                                           \n"\
+"					float3 xA = (float3)(1.f, 0.f, 0.f);                                                                                           \n"\
+"					float3 yA = (float3)(0.f, 1.f, 0.f);                                                                                           \n"\
+"					float3 mm1 = (float3)(1.f,0.f,0.f);                                                                    \n"\
+"					float3 mm2 = (float3)(0.f,1.f,0.f);                                                                    \n"\
+"					float3 mm3 = (float3)(0.f,0.f,1.f);                                                                    \n"\
+"					float3 p = (float3)(0.f,0.f,1.f);                                                                                      \n"\
+"						mm1 = (float3)(m00,m01,m02) * (float3)(1.f - r * mb) + (float3)(m10,m11,m12) * (float3)(r * mb);                                              \n"\
+"						mm2 = (float3)(m03,m04,m05) * (float3)(1.f - r * mb) + (float3)(m13,m14,m15) * (float3)(r * mb);                                              \n"\
+"						mm3 = (float3)(m06,m07,m08) * (float3)(1.f - r * mb) + (float3)(m16,m17,m18) * (float3)(r * mb);                                              \n"\
+"						p = (float3)(m0x,m0y,m0z) * (float3)(1.f - r * mb) + (float3)(m1x,m1y,m1z) * (float3)(r * mb); //part 2 :O                                      \n"\
+"					float3 l1 = (float3)(p.xy, (p.z + 1.f));                                                                      \n"\
 "					float3 l2 = (float3)(uv + p.xy, p.z);		// = -0.5                                                \n"\
 "					float3 l1t = l1;                                                                                                 \n"\
 "					float3 l2t = l2;                                                                                                 \n"\
@@ -103,30 +103,30 @@ const char* KernelSourceBuffers = "\n" \
 "					l1.z = dot(l1t, mm3);                                                               \n"\
 "					l2.z = dot(l2t, mm3);                                                               \n"\
 "					d = dot(zA, l2 - l1);                                                                                            \n"\
-"					fac = ((d > 0. ? (p_wZ == 1. ? 1. : 0.) : 0.) - dot(zA, l1)) / d;                                                \n"\
-"					float2 uhh = (float2)(0., 0.);                                                                                              \n"\
-"				    fwd = forward == 0 && d > 0.;                                                                                   \n"\
-"					horizon = fac < 0. || fwd;                                                                          \n"\
+"					fac = ((d > 0.f ? (p_wZ == 1.f ? 1.f : 0.f) : 0.f) - dot(zA, l1)) / d;                                                \n"\
+"					float2 uhh = (float2)(0.f, 0.f);                                                                                              \n"\
+"				    fwd = forward == 0 && d > 0.f;                                                                                   \n"\
+"					horizon = fac < 0.f || fwd;                                                                          \n"\
 "					if (r == 0) {                                                                          \n"\
 "					plot1.x = dot((l1 + ((l2 - l1) * fabs(fac))), xA);                                                                 \n"\
 "					plot1.y = dot((l1 + ((l2 - l1) * fabs(fac))), yA);                                                                 \n"\
 "					plot1.x /= ratio;                                                                 \n"\
-"					plot1 += (float2)0.5;                                                                 \n"\
+"					plot1 += (float2)0.5f;                                                                 \n"\
 "					} else {                                                                 \n"\
 "					plot2.x = dot((l1 + ((l2 - l1) * fabs(fac))), xA);                                                                 \n"\
 "					plot2.y = dot((l1 + ((l2 - l1) * fabs(fac))), yA);                                                                 \n"\
 "					plot2.x /= ratio;                                                                 \n"\
-"					plot2 += (float2)0.5;                                                                 \n"\
+"					plot2 += (float2)0.5f;                                                                 \n"\
 "					}                                                                 \n"\
 "					}                                                                 \n"\
-"			for (int b = 1; b <= bMax; b++) {                                 \n"\
+"			for (int b = 1; b <= bMax; b++) {                                                                         \n"\
 "			    if(mb > 0) {                                                                         \n"\
-"					float rng = sin((index)*112.9898*b + 179.233) * 43758.5453; \n"\
+"					float rng = sin((index)*112.9898f*b + 179.233f) * 43758.5453f; \n"\
 "					rng -= floor(rng); \n"\
 "					rng += b - 1; \n"\
 "					rng /= bMax; \n"\
-"						plot.x = plot1.x * (1. - rng) + plot2.x * rng;                                                               \n"\
-"						plot.y = plot1.y * (1. - rng) + plot2.y * rng;                                                               \n"\
+"						plot.x = plot1.x * (1.f - rng) + plot2.x * rng;                                                               \n"\
+"						plot.y = plot1.y * (1.f - rng) + plot2.y * rng;                                                               \n"\
 "					} else {                                                                                                         \n"\
 "						plot = plot1;                                                                                            \n"\
 "					}                                                                                                         \n"\
@@ -141,17 +141,17 @@ const char* KernelSourceBuffers = "\n" \
 "								tx -= xCrop * floor(tx / xCrop);                     \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								tx = xCrop - fabs((tx - 2. * xCrop * floor(tx / xCrop / 2.)) - xCrop);                                    \n"\
+"								tx = xCrop - fabs((tx - 2.f * xCrop * floor(tx / xCrop / 2.f)) - xCrop);                                    \n"\
 "							}                                                                                                        \n"\
 "							switch ((int)(p_wY)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
 "								ty -= yCrop * floor(ty / yCrop);                                                                   \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								ty = yCrop - fabs((ty - 2. * yCrop * floor(ty / yCrop / 2.)) - yCrop);                                    \n"\
+"								ty = yCrop - fabs((ty - 2.f * yCrop * floor(ty / yCrop / 2.f)) - yCrop);                                    \n"\
 "							}                                                                                                        \n"\
-"							if(p_wX != 0) tx = tx < 0. ? 0. : (tx > xCrop - 1. ? xCrop - 1. : tx);                                    \n"\
-"							if(p_wY != 0) ty = ty < 0. ? 0. : (ty > yCrop - 1. ? yCrop - 1. : ty);                                    \n"\
+"							if(p_wX != 0) tx = tx < 0.f ? 0.f : (tx > xCrop - 1.f ? xCrop - 1.f : tx);                                    \n"\
+"							if(p_wY != 0) ty = ty < 0.f ? 0.f : (ty > yCrop - 1.f ? yCrop - 1.f : ty);                                    \n"\
 "								tx += boundX1*xWin;                     \n"\
 "								ty += boundY1*yWin;                     \n"\
 "							int ix = (int)round(tx);                                                                                 \n"\
@@ -249,38 +249,38 @@ const char* KernelSourceImages = "\n" \
 "	float xWin = p_Width;                                                                                                            \n"\
 "	float yWin = p_Height;                                                                                                           \n"\
 "	float ratio = xWin / yWin;                                                                                                       \n"\
-"	float pi = 3.14159265358979323846;                                                                                              \n"\
+"	float pi = 3.14159265358979323846f;                                                                                              \n"\
 "	if (index < p_Width * p_Height) {                                                                                                \n"\
 "		if (off == 1) {                                                                                                              \n"\
 "			uint4 valueui = (uint4)(0,0,0,0);                                                                                           \n"\
 "			float4 valuef = (float4)(0,0,0,0);                                                                                           \n"\
-"			int bMax = (int)ceil(mb * 32.);                                                                                         \n"\
+"			int bMax = (int)ceil(mb * 32.f);                                                                                         \n"\
 "			bMax = bMax < 1 ? 1 : bMax;                                                                                            \n"\
 "			float2 uv;                                                                                                               \n"\
-"				float2 plot = (float2)(0., 0.);                                                                                                 \n"\
-"				float2 plot1 = (float2)(0., 0.);                                                                                                 \n"\
-"				float2 plot2 = (float2)(0., 0.);                                                                                                 \n"\
-"				float d = 0., fac = 0.;                                                                                              \n"\
+"				float2 plot = (float2)(0.f, 0.f);                                                                                                 \n"\
+"				float2 plot1 = (float2)(0.f, 0.f);                                                                                                 \n"\
+"				float2 plot2 = (float2)(0.f, 0.f);                                                                                                 \n"\
+"				float d = 0.f, fac = 0.f;                                                                                              \n"\
 "				bool horizon, fwd;                                                                                              \n"\
 "				int rTimes = mb > 0 ? 2 : 1;                                                                                              \n"\
 "					for(int r = 0; r < rTimes; r++) {                                                                                                \n"\
 "					uv.x = x / xWin;                                                                                                \n"\
 "					uv.y = y / yWin;                                                                                                \n"\
-"					uv.x -= 0.5;                                                                                                     \n"\
-"					uv.y -= 0.5;                                                                                                     \n"\
+"					uv.x -= 0.5f;                                                                                                     \n"\
+"					uv.y -= 0.5f;                                                                                                     \n"\
 "					uv.x *= ratio;                                                                                                   \n"\
-"					float3 zA = (float3)(0., 0., 1.);                                                                                           \n"\
-"					float3 xA = (float3)(1., 0., 0.);                                                                                           \n"\
-"					float3 yA = (float3)(0., 1., 0.);                                                                                           \n"\
-"					float3 mm1 = (float3)(1.,0.,0.);                                                                    \n"\
-"					float3 mm2 = (float3)(0.,1.,0.);                                                                    \n"\
-"					float3 mm3 = (float3)(0.,0.,1.);                                                                    \n"\
-"					float3 p = (float3)(0.,0.,1.);                                                                                      \n"\
-"						mm1 = (float3)(m00,m01,m02) * (float3)(1. - r * mb) + (float3)(m10,m11,m12) * (float3)(r * mb);                                              \n"\
-"						mm2 = (float3)(m03,m04,m05) * (float3)(1. - r * mb) + (float3)(m13,m14,m15) * (float3)(r * mb);                                              \n"\
-"						mm3 = (float3)(m06,m07,m08) * (float3)(1. - r * mb) + (float3)(m16,m17,m18) * (float3)(r * mb);                                              \n"\
-"						p = (float3)(m0x,m0y,m0z) * (float3)(1. - r * mb) + (float3)(m1x,m1y,m1z) * (float3)(r * mb); //part 2 :O                                      \n"\
-"					float3 l1 = (float3)(p.xy, (p.z + 1.));                                                                      \n"\
+"					float3 zA = (float3)(0.f, 0.f, 1.f);                                                                                           \n"\
+"					float3 xA = (float3)(1.f, 0.f, 0.f);                                                                                           \n"\
+"					float3 yA = (float3)(0.f, 1.f, 0.f);                                                                                           \n"\
+"					float3 mm1 = (float3)(1.f,0.f,0.f);                                                                    \n"\
+"					float3 mm2 = (float3)(0.f,1.f,0.f);                                                                    \n"\
+"					float3 mm3 = (float3)(0.f,0.f,1.f);                                                                    \n"\
+"					float3 p = (float3)(0.f,0.f,1.f);                                                                                      \n"\
+"						mm1 = (float3)(m00,m01,m02) * (float3)(1.f - r * mb) + (float3)(m10,m11,m12) * (float3)(r * mb);                                              \n"\
+"						mm2 = (float3)(m03,m04,m05) * (float3)(1.f - r * mb) + (float3)(m13,m14,m15) * (float3)(r * mb);                                              \n"\
+"						mm3 = (float3)(m06,m07,m08) * (float3)(1.f - r * mb) + (float3)(m16,m17,m18) * (float3)(r * mb);                                              \n"\
+"						p = (float3)(m0x,m0y,m0z) * (float3)(1.f - r * mb) + (float3)(m1x,m1y,m1z) * (float3)(r * mb); //part 2 :O                                      \n"\
+"					float3 l1 = (float3)(p.xy, (p.z + 1.f));                                                                      \n"\
 "					float3 l2 = (float3)(uv + p.xy, p.z);		// = -0.5                                                \n"\
 "					float3 l1t = l1;                                                                                                 \n"\
 "					float3 l2t = l2;                                                                                                 \n"\
@@ -291,31 +291,31 @@ const char* KernelSourceImages = "\n" \
 "					l1.z = dot(l1t, mm3);                                                               \n"\
 "					l2.z = dot(l2t, mm3);                                                               \n"\
 "					d = dot(zA, l2 - l1);                                                                                            \n"\
-"					fac = ((d > 0. ? (p_wZ == 1. ? 1. : 0.) : 0.) - dot(zA, l1)) / d;                                                \n"\
-"					float2 uhh = (float2)(0., 0.);                                                                                              \n"\
-"				    fwd = forward == 0 && d > 0.;                                                                                   \n"\
-"					horizon = fac < 0. || fwd;                                                                          \n"\
+"					fac = ((d > 0.f ? (p_wZ == 1.f ? 1.f : 0.f) : 0.f) - dot(zA, l1)) / d;                                                \n"\
+"					float2 uhh = (float2)(0.f, 0.f);                                                                                              \n"\
+"				    fwd = forward == 0 && d > 0.f;                                                                                   \n"\
+"					horizon = fac < 0.f || fwd;                                                                          \n"\
 "					if (r == 0) {                                                                          \n"\
 "					plot1.x = dot((l1 + ((l2 - l1) * fabs(fac))), xA);                                                                 \n"\
 "					plot1.y = dot((l1 + ((l2 - l1) * fabs(fac))), yA);                                                                 \n"\
 "					plot1.x /= ratio;                                                                 \n"\
-"					plot1 += (float2)0.5;                                                                 \n"\
+"					plot1 += (float2)0.5f;                                                                 \n"\
 "					} else {                                                                 \n"\
 "					plot2.x = dot((l1 + ((l2 - l1) * fabs(fac))), xA);                                                                 \n"\
 "					plot2.y = dot((l1 + ((l2 - l1) * fabs(fac))), yA);                                                                 \n"\
 "					plot2.x /= ratio;                                                                 \n"\
-"					plot2 += (float2)0.5;                                                                 \n"\
+"					plot2 += (float2)0.5f;                                                                 \n"\
 "					}                                                                 \n"\
 "					}                                                                 \n"\
 "					float4 valueCheck;                 \n"\
 "			for (int b = 1; b <= bMax; b++) {                                                                         \n"\
 "			    if(mb > 0) {                                                                         \n"\
-"					float rng = sin((index)*112.9898*b + 179.233) * 43758.5453; \n"\
+"					float rng = sin((index)*112.9898f*b + 179.233f) * 43758.5453f; \n"\
 "					rng -= floor(rng); \n"\
 "					rng += b - 1; \n"\
 "					rng /= bMax; \n"\
-"						plot.x = plot1.x * (1. - rng) + plot2.x * rng;                                                               \n"\
-"						plot.y = plot1.y * (1. - rng) + plot2.y * rng;                                                               \n"\
+"						plot.x = plot1.x * (1.f - rng) + plot2.x * rng;                                                               \n"\
+"						plot.y = plot1.y * (1.f - rng) + plot2.y * rng;                                                               \n"\
 "					} else {                                                                                                         \n"\
 "						plot = plot1;                                                                                            \n"\
 "					}                                                                                                         \n"\
@@ -330,33 +330,33 @@ const char* KernelSourceImages = "\n" \
 "								tx -= xCrop * floor(tx / xCrop);                     \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								tx = xCrop - fabs((tx - 2. * xCrop * floor(tx / xCrop / 2.)) - xCrop);                                    \n"\
+"								tx = xCrop - fabs((tx - 2.f * xCrop * floor(tx / xCrop / 2.f)) - xCrop);                                    \n"\
 "							}                                                                                                        \n"\
 "							switch ((int)(p_wY)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
 "								ty -= yCrop * floor(ty / yCrop);                                                                   \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								ty = yCrop - fabs((ty - 2. * yCrop * floor(ty / yCrop / 2.)) - yCrop);                                    \n"\
+"								ty = yCrop - fabs((ty - 2.f * yCrop * floor(ty / yCrop / 2.f)) - yCrop);                                    \n"\
 "							}                                                                                                        \n"\
-"							if(p_wX != 0) tx = tx < 0. ? 0. : (tx > xCrop - 1. ? xCrop - 1. : tx);                                    \n"\
-"							if(p_wY != 0) ty = ty < 0. ? 0. : (ty > yCrop - 1. ? yCrop - 1. : ty);                                    \n"\
+"							if(p_wX != 0) tx = tx < 0.f ? 0.f : (tx > xCrop - 1.f ? xCrop - 1.f : tx);                                    \n"\
+"							if(p_wY != 0) ty = ty < 0.f ? 0.f : (ty > yCrop - 1.f ? yCrop - 1.f : ty);                                    \n"\
 "								tx += boundX1*xWin;                     \n"\
 "								ty += boundY1*yWin;                     \n"\
 "                                                                                                                                    \n"\
 "							if (!horizon && (tx >= boundX1*xWin && tx < boundX2*xWin) && (ty >= boundY1*yWin && ty < boundY2*yWin))                                              \n"\
 "							{                                                                                                        \n"\
-"							    tx += 0.5;                                                                                          \n"\
-"							    ty += 0.5;                                                                                          \n"\
-"							    tx = tx < 0. ? 0. : (tx > xWin - 1. ? xWin - 1. : tx);                                    \n"\
-"							    ty = ty < 0. ? 0. : (ty > yWin - 1. ? yWin - 1. : ty);                                    \n"\
+"							    tx += 0.5f;                                                                                          \n"\
+"							    ty += 0.5f;                                                                                          \n"\
+"							    tx = tx < 0.f ? 0.f : (tx > xWin - 1.f ? xWin - 1.f : tx);                                    \n"\
+"							    ty = ty < 0.f ? 0.f : (ty > yWin - 1.f ? yWin - 1.f : ty);                                    \n"\
 "					            valueCheck = read_imagef(p_Input, imageSampler, (float2)(tx, ty));                 \n"\
 "								valuef += valueCheck / bMax;              \n"\
 "					    }                                                                                                              \n"\
 "			}                                                                                                                        \n"\
 "					            write_imagef(p_Output, (int2)(x, y), (float4)valuef);              \n"\
 "		} else {                                                                                                                            \n"\
-"		    float4 col = read_imagef(p_Input, imageSampler, (float2)(x+0.5, y+0.5));                 \n"\
+"		    float4 col = read_imagef(p_Input, imageSampler, (float2)(x+0.5f, y+0.5f));                 \n"\
 "		    write_imagef(p_Output, (int2)(x, y), col);                                                                  \n"\
 "		}                                                                                                                            \n"\
 "	}                                                                                                                                \n"\

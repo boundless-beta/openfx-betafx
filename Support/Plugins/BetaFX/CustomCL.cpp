@@ -424,6 +424,8 @@ void CustomCLEffectFactory::describe(OFX::ImageEffectDescriptor& p_Desc)
     p_Desc.setSupportsMultipleClipPARs(kSupportsMultipleClipPARs);
 
     // Setup OpenCL render capability flags
+    p_Desc.setSupportsOpenCLImagesRender(true);
+    p_Desc.setSupportsOpenCLBuffersRender(true);
 }
 
 static DoubleParamDescriptor* newDoubleParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
