@@ -14,10 +14,18 @@
 #include <math.h>
 #include <cmath>
 
+
+#ifdef __APPLE__
+#include <OpenCL/cl.h>
+#else
+#include <CL/cl.h>
+#endif
 #include "ofxsImageEffect.h"
 #include "ofxsMultiThread.h"
 #include "ofxsProcessing.h"
 #include "ofxsLog.h"
+
+#include "CLFuncs.h"
 
 #define kPluginName "BetaFX Custom OpenCL Kernel"
 #define kPluginGrouping "BetaFX"
@@ -41,7 +49,7 @@ public:
     virtual void multiThreadProcessImages(OfxRectI p_ProcWindow);
 
     void setSrcImg(OFX::Image* p_SrcImg);
-    void setScales(std::string k, double* floats, int instanceCount, bool errorCheck, float timeIn);
+    void setScales(std::string k, double* floats, int instanceCount, bool errorCheck, float timeIn, bool clFlag);
 
 private:
     OFX::Image* _srcImg;
@@ -50,6 +58,7 @@ private:
     int instance;
     bool errorTogg;
     float time;
+    bool CLFlag;
 };
 
 CustomCL::CustomCL(OFX::ImageEffect& p_Instance)
@@ -58,7 +67,7 @@ CustomCL::CustomCL(OFX::ImageEffect& p_Instance)
 }
 
 template<class PIX>
-extern void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output);
+extern void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output, bool isDisabled);
 
 template<class PIX>
 extern void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output);
@@ -117,23 +126,26 @@ void CustomCL::processImagesOpenCL()
     const int width = bounds.x2 - bounds.x1;
     const int height = bounds.y2 - bounds.y1;
     int bitDepth = _srcImg->getPixelDepth() == OFX::eBitDepthUByte ? 8 : 32;
-    float *inputF, *outputF;
-    unsigned char *inputUI, *outputUI;
-    if (bitDepth == 8) {
-        inputUI = static_cast<unsigned char*>(_srcImg->getOpenCLImage());
-        outputUI = static_cast<unsigned char*>(_dstImg->getOpenCLImage());
-    } else {
-        inputF = static_cast<float*>(_srcImg->getOpenCLImage());
-        outputF = static_cast<float*>(_dstImg->getOpenCLImage());
-    }
+    float* inputF, * outputF;
+    inputF = static_cast<float*>(_srcImg->getOpenCLImage());
+    outputF = static_cast<float*>(_dstImg->getOpenCLImage());
+    unsigned char* inputUI, * outputUI;
+    inputUI = static_cast<unsigned char*>(_srcImg->getOpenCLImage());
+    outputUI = static_cast<unsigned char*>(_dstImg->getOpenCLImage());
+
+    cl_context clContext = NULL;
+    cl_device_id deviceId = NULL;
+    clContext = GetContext(deviceId);
+    cl_int error = CL_SUCCESS;
+    if (!fallbackQ) fallbackQ = clCreateCommandQueue(clContext, deviceId, 0, &error);
 
     // if a plugin supports both OpenCL Buffers and Images, the host decides which is used and
     // the plugin must determine which based on whether kOfxImageEffectPropOpenCLImage or kOfxImagePropData is set
     
-    if (bitDepth == 8 && (inputUI || outputUI))
+    if (bitDepth == 8 && (inputUI || outputUI) && !CLFlag)
     {
             RunOpenCLKernelImages<unsigned char>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputUI, outputUI);
-    } else if (inputF || outputF) {
+    } else if ((inputF || outputF) && !CLFlag) {
             RunOpenCLKernelImages<float>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputF, outputF);
         }
     else if(bitDepth == 8)
@@ -141,21 +153,21 @@ void CustomCL::processImagesOpenCL()
         inputUI = static_cast<unsigned char*>(_srcImg->getPixelData());
         outputUI = static_cast<unsigned char*>(_dstImg->getPixelData());
 
-        RunOpenCLKernelBuffers<unsigned char>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputUI, outputUI);
+        RunOpenCLKernelBuffers<unsigned char>(CLFlag ? fallbackQ : _pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputUI, outputUI, CLFlag);
 }
     else
     {
         inputF = static_cast<float*>(_srcImg->getPixelData());
         outputF = static_cast<float*>(_dstImg->getPixelData());
 
-        RunOpenCLKernelBuffers<float>(_pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputF, outputF);
+        RunOpenCLKernelBuffers<float>(CLFlag ? fallbackQ : _pOpenCLCmdQ, width, height, kernel, kFloats, instance, time, bitDepth, errorTogg, inputF, outputF, CLFlag);
 }
 #endif
 }
 
 void CustomCL::multiThreadProcessImages(OfxRectI p_ProcWindow)
 { 
-    int me = 0;
+        int me = 0;
     /*
     for (int y = p_ProcWindow.y1; y < p_ProcWindow.y2; ++y)
     {
@@ -196,7 +208,7 @@ void CustomCL::setSrcImg(OFX::Image* p_SrcImg)
     _srcImg = p_SrcImg;
 }
 
-void CustomCL::setScales(std::string k, double* floats, int instanceCount, bool errorCheck, float timeIn)
+void CustomCL::setScales(std::string k, double* floats, int instanceCount, bool errorCheck, float timeIn, bool clFlag)
 {
     kernel = k;
     for (int i = 0; i < 16; i++) {
@@ -207,6 +219,8 @@ void CustomCL::setScales(std::string k, double* floats, int instanceCount, bool 
     errorTogg = errorCheck;
 
     time = timeIn;
+
+    CLFlag = clFlag;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -350,7 +364,6 @@ void CustomCLEffect::setupAndProcess(CustomCL& p_CustomCL, const OFX::RenderArgu
     pFloats[15] = float15->getValueAtTime(p_Args.time);
     // parameters end here
 
-    p_CustomCL.setScales(pKernel, pFloats, instanceHandle, errors, (p_Args.time / frameRate));
 
     // Set the images
     p_CustomCL.setDstImg(dst.get());
@@ -362,8 +375,15 @@ void CustomCLEffect::setupAndProcess(CustomCL& p_CustomCL, const OFX::RenderArgu
     // Set the render window
     p_CustomCL.setRenderWindow(p_Args.renderWindow);
 
+    bool clCheck = !p_Args.isEnabledOpenCLRender && postCLCheck();
+    p_CustomCL.setScales(pKernel, pFloats, instanceHandle, errors, (p_Args.time / frameRate), clCheck);
     // Call the base class process member, this will call the derived templated process code
-    p_CustomCL.process();
+    if (clCheck) {
+        p_CustomCL.processImagesOpenCL();
+    }
+    else {
+        p_CustomCL.process();
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -404,8 +424,6 @@ void CustomCLEffectFactory::describe(OFX::ImageEffectDescriptor& p_Desc)
     p_Desc.setSupportsMultipleClipPARs(kSupportsMultipleClipPARs);
 
     // Setup OpenCL render capability flags
-    p_Desc.setSupportsOpenCLBuffersRender(true);
-    p_Desc.setSupportsOpenCLImagesRender(true);
 }
 
 static DoubleParamDescriptor* newDoubleParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,

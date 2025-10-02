@@ -670,7 +670,7 @@ namespace OFX {
   {
     try {
 
-      _effectProps.propSetString(kOfxImageEffectPropOpenCLRenderSupported, (v ? "true" : "false"));
+      _effectProps.propSetString(kOfxImageEffectPropOpenCLRenderSupported, (v ? "true" : "false"), false);
     } catch(OFX::Exception::PropertyUnknownToHost) {
       OFX::Log::warning(true, "Host does not have kOfxImageEffectPropOpenCLRenderSupported property");
     }
@@ -681,7 +681,7 @@ namespace OFX {
   {
     try {
 
-      _effectProps.propSetString(kOfxImageEffectPropOpenCLSupported, (v ? "true" : "false"));
+      _effectProps.propSetString(kOfxImageEffectPropOpenCLSupported, (v ? "true" : "false"), false);
     } catch(OFX::Exception::PropertyUnknownToHost) {
       OFX::Log::warning(true, "Host does not have kOfxImageEffectPropOpenCLSupported property");
     }

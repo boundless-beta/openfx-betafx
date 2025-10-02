@@ -6,7 +6,6 @@
 
 #include <stdio.h>
 #include <vector>
-#include <map>
 #include <mutex>
 #include <memory>
 #include <thread>
@@ -18,7 +17,15 @@
 #include "ofxsProcessing.h"
 #include "ofxsLog.h"
 
+
+#ifdef __APPLE__
+#include <OpenCL/cl.h>
+#else
+#include <CL/cl.h>
+#endif
 #include "BetaFXCommon.h"
+#include "CLFuncs.h"
+
 
 #define kPluginName "BetaFX Dynamic Transform"
 #define kPluginGrouping "BetaFX"
@@ -31,6 +38,7 @@
 #define kSupportsMultiResolution false
 #define kSupportsMultipleClipPARs false
 
+/*
 #define INSTANCE_COUNT 1024
 std::vector<double> lastTime(INSTANCE_COUNT, 0);
 std::vector<double> lastVel(18 * INSTANCE_COUNT, 0);
@@ -41,10 +49,11 @@ std::vector<double> lastRate(18 * INSTANCE_COUNT, 0);
 std::vector<double> lastRate2(18 * INSTANCE_COUNT, 0);
 std::vector<double> lastRateW(18 * INSTANCE_COUNT, 0);
 std::vector<double> lastRateW2(18 * INSTANCE_COUNT, 0);
-int instanceStarted[INSTANCE_COUNT];
+*/
+
 float buffers[64][16][25];
 
-void initBuffer() {
+static void initBuffer() {
     for (int i = 0; i < 64; i++) {
         for (int j = 0; j < 16; j++) {
             for (int k = 0; k < 25; k++) {
@@ -55,6 +64,7 @@ void initBuffer() {
 }
 
 int transformIndex;
+double frameRate = 60.0;
 
 float buffersCPU[64][16][25];
 static void initBufferCPU() {
@@ -80,7 +90,7 @@ public:
     virtual void multiThreadProcessImages(OfxRectI p_ProcWindow);
 
     void setSrcImg(OFX::Image* p_SrcImg);
-    void setScales(double m0x, double m0y, double m0z, double m00, double m01, double m02, double m03, double m04, double m05, double m06, double m07, double m08, double m1x, double m1y, double m1z, double m10, double m11, double m12, double m13, double m14, double m15, double m16, double m17, double m18, int p_wX, int p_wY, int p_wZ, double mb, double xScale, double yScale, double zScale, double xRot, double yRot, double zRot, int pIndex, int pSend, int thisThread, int toggle, int forward, int bitDepth);
+    void setScales(double m0x, double m0y, double m0z, double m00, double m01, double m02, double m03, double m04, double m05, double m06, double m07, double m08, double m1x, double m1y, double m1z, double m10, double m11, double m12, double m13, double m14, double m15, double m16, double m17, double m18, int p_wX, int p_wY, int p_wZ, double mb, double xScale, double yScale, double zScale, double xRot, double yRot, double zRot, int pIndex, int pSend, int thisThread, int toggle, int forward, int bitDepth, bool clFlag, float boundX1, float boundX2, float boundY1, float boundY2);
 
 private:
     OFX::Image* _srcImg;
@@ -98,6 +108,8 @@ private:
     int off;
     int front;
     int bits;
+    bool CLFlag;
+    float rBounds[4];
 };
 
 DynamicTransform::DynamicTransform(OFX::ImageEffect& p_Instance)
@@ -105,27 +117,35 @@ DynamicTransform::DynamicTransform(OFX::ImageEffect& p_Instance)
 {
 }
 
-#ifdef OFX_SUPPORTS_CUDARENDER
-extern void RunCudaKernel(void* p_Stream, int p_Width, int p_Height, float* p_Gain, const float* p_Input, float* p_Output);
-#endif
-
 void DynamicTransform::processImagesCuda()
 {
 #ifdef OFX_SUPPORTS_CUDARENDER
+
     const OfxRectI& bounds = _srcImg->getBounds();
     const int width = bounds.x2 - bounds.x1;
     const int height = bounds.y2 - bounds.y1;
+    unsigned char* inputUI, * outputUI;
+    float* inputF, * outputF;
+    int bitDepth = _srcImg->getPixelDepth() == OFX::eBitDepthUByte ? 8 : 32;
 
-    float* input = static_cast<float*>(_srcImg->getPixelData());
-    float* output = static_cast<float*>(_dstImg->getPixelData());
+    // if a plugin supports both OpenCL Buffers and Images, the host decides which is used and
+    // the plugin must determine which based on whether kOfxImageEffectPropOpenCLImage or kOfxImagePropData is set
+    if (bitDepth == 8)
+    {
+        inputUI = static_cast<unsigned char*>(_srcImg->getPixelData());
+        outputUI = static_cast<unsigned char*>(_dstImg->getPixelData());
 
-    RunCudaKernel(_pCudaStream, width, height, _scales, input, output);
+        RunCudaKernel<unsigned char>(_pCudaStream, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputUI, outputUI);
+    }
+    else
+    {
+        inputF = static_cast<float*>(_srcImg->getPixelData());
+        outputF = static_cast<float*>(_dstImg->getPixelData());
+
+        RunCudaKernel<float>(_pCudaStream, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputF, outputF);
+    }
 #endif
 }
-
-#ifdef __APPLE__
-extern void RunMetalKernel(void* p_CmdQ, int p_Width, int p_Height, float* p_Gain, const float* p_Input, float* p_Output);
-#endif
 
 void DynamicTransform::processImagesMetal()
 {
@@ -142,10 +162,10 @@ void DynamicTransform::processImagesMetal()
 }
 
 template<class PIX>
-extern void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int now, int send, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output);
+extern void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int now, int send, int toggle, int front, int bits, const void* p_Input, void* p_Output, bool isDisabled, float* bounds);
 
 template<class PIX>
-extern void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output);
+extern void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output, float* bounds);
 // extern void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* p_Gain, const float* p_Input, float* p_Output);
 /* kernel parameter list
 int p_Width
@@ -201,39 +221,43 @@ void DynamicTransform::processImagesOpenCL()
     const int width = bounds.x2 - bounds.x1;
     const int height = bounds.y2 - bounds.y1;
     int bitDepth = _srcImg->getPixelDepth() == OFX::eBitDepthUByte ? 8 : 32;
-    float *inputF, *outputF;
-    unsigned char *inputUI, *outputUI;
-    if (bitDepth == 8) {
-        inputUI = static_cast<unsigned char*>(_srcImg->getOpenCLImage());
-        outputUI = static_cast<unsigned char*>(_dstImg->getOpenCLImage());
-    } else {
-        inputF = static_cast<float*>(_srcImg->getOpenCLImage());
-        outputF = static_cast<float*>(_dstImg->getOpenCLImage());
-    }
+    float* inputF, * outputF;
+    inputF = static_cast<float*>(_srcImg->getOpenCLImage());
+    outputF = static_cast<float*>(_dstImg->getOpenCLImage());
+    unsigned char* inputUI, * outputUI;
+    inputUI = static_cast<unsigned char*>(_srcImg->getOpenCLImage());
+    outputUI = static_cast<unsigned char*>(_dstImg->getOpenCLImage());
+    
+    cl_context clContext = NULL;
+    cl_device_id deviceId = NULL;
+    clContext = GetContext(deviceId);
+    cl_int error = CL_SUCCESS;
+    if (!fallbackQ) fallbackQ = clCreateCommandQueue(clContext, deviceId, 0, &error);
 
     // if a plugin supports both OpenCL Buffers and Images, the host decides which is used and
     // the plugin must determine which based on whether kOfxImageEffectPropOpenCLImage or kOfxImagePropData is set
-    
-    if (bitDepth == 8 && (inputUI || outputUI))
+
+    if (bitDepth == 8 && (inputUI || outputUI) && !CLFlag)
     {
-            RunOpenCLKernelImages<unsigned char>(_pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputUI, outputUI);
-    } else if (inputF || outputF) {
-            RunOpenCLKernelImages<float>(_pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputF, outputF);
-        }
-    else if(bitDepth == 8)
+        RunOpenCLKernelImages<unsigned char>(_pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputUI, outputUI, rBounds);
+    }
+    else if ((inputF || outputF) && !CLFlag) {
+        RunOpenCLKernelImages<float>(_pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputF, outputF, rBounds);
+    }
+    else if (bitDepth == 8)
     {
         inputUI = static_cast<unsigned char*>(_srcImg->getPixelData());
         outputUI = static_cast<unsigned char*>(_dstImg->getPixelData());
 
-        RunOpenCLKernelBuffers<unsigned char>(_pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputUI, outputUI);
-}
+        RunOpenCLKernelBuffers<unsigned char>(CLFlag ? fallbackQ : _pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputUI, outputUI, CLFlag, rBounds);
+    }
     else
     {
         inputF = static_cast<float*>(_srcImg->getPixelData());
         outputF = static_cast<float*>(_dstImg->getPixelData());
 
-        RunOpenCLKernelBuffers<float>(_pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputF, outputF);
-}
+        RunOpenCLKernelBuffers<float>(CLFlag ? fallbackQ : _pOpenCLCmdQ, width, height, m0, m1, wX, wY, wZ, blur, scales, angles, index, send, now, off, front, bitDepth, inputF, outputF, CLFlag, rBounds);
+    }
 #endif
 }
 static void crossMatrix(float ma[], float mb[], float mo[]) {
@@ -253,7 +277,7 @@ static void getPos(float p[], float m[], float o[]) {
     o[2] = p[0] * m[6] + p[1] * m[7] + p[2] * m[8];
 }
 static void inverseMatrix(float m[], float n[]) {
-    float t[9];
+    float t[9]{};
     n[0] = m[4] * m[8] - m[5] * m[7];// 0 1 20 1 2 
     n[1] = m[5] * m[6] - m[3] * m[8];// 3 4 53 4 5 
     n[2] = m[3] * m[7] - m[4] * m[6];// 6 7 86 7 8 
@@ -297,7 +321,7 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
         float bP[25] = {};
         float mb0 = blur;
         if (index != 0) {
-            float pParams[25];
+            float pParams[25]{};
             for (int i = 0; i < 25; i++) {
                 pParams[i] = buffersCPU[now][index - 1][i];
             }
@@ -367,8 +391,9 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
             }
             lockey.Unlock();
         }
-        float xWin = p_ProcWindow.x2 - p_ProcWindow.x1;
-        float yWin = p_ProcWindow.y2 - p_ProcWindow.y1;
+        float xWin = _dstImg->getBounds().x2 - _dstImg->getBounds().x1;
+        float yWin = _dstImg->getBounds().y2 - _dstImg->getBounds().y1;
+
         float ratio = xWin / yWin;
         float pi = 3.14159265358979323846;
 
@@ -445,7 +470,7 @@ void DynamicTransform::multiThreadProcessImages(OfxRectI p_ProcWindow)
                         }
                     }
                     for (int b = 1; b <= bMax; b++) {
-                        float rng = (sin((x + y * xWin) * 112.9898f * b + 179.233f) *2. - 1.) * 43758.5453f;
+                        float rng = (sin((x + y * xWin) * 112.9898f * b + 179.233f) * 2. - 1.) * 43758.5453f;
                         rng -= floor(rng);
                         rng += b - 1;
                         rng /= bMax;
@@ -551,7 +576,7 @@ void DynamicTransform::setSrcImg(OFX::Image* p_SrcImg)
     _srcImg = p_SrcImg;
 }
 
-void DynamicTransform::setScales(double m0x, double m0y, double m0z, double m00, double m01, double m02, double m03, double m04, double m05, double m06, double m07, double m08, double m1x, double m1y, double m1z, double m10, double m11, double m12, double m13, double m14, double m15, double m16, double m17, double m18, int p_wX, int p_wY, int p_wZ, double mb, double xScale, double yScale, double zScale, double xRot, double yRot, double zRot, int pIndex, int pSend, int thisThread, int toggle, int forward, int bitDepth)
+void DynamicTransform::setScales(double m0x, double m0y, double m0z, double m00, double m01, double m02, double m03, double m04, double m05, double m06, double m07, double m08, double m1x, double m1y, double m1z, double m10, double m11, double m12, double m13, double m14, double m15, double m16, double m17, double m18, int p_wX, int p_wY, int p_wZ, double mb, double xScale, double yScale, double zScale, double xRot, double yRot, double zRot, int pIndex, int pSend, int thisThread, int toggle, int forward, int bitDepth, bool clFlag, float boundX1, float boundX2, float boundY1, float boundY2)
 {
     m0[0] = m0x;
     m0[1] = m0y;
@@ -593,6 +618,11 @@ void DynamicTransform::setScales(double m0x, double m0y, double m0z, double m00,
     off = toggle;
     front = forward;
     bits = bitDepth;
+    CLFlag = clFlag;
+    rBounds[0] = boundX1;
+    rBounds[1] = boundX2;
+    rBounds[2] = boundY1;
+    rBounds[3] = boundY2;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -600,17 +630,38 @@ void DynamicTransform::setScales(double m0x, double m0y, double m0z, double m00,
 class TransformGPU : public OFX::ImageEffect
 {
 public:
+
     explicit TransformGPU(OfxImageEffectHandle p_Handle);
 
     /* Override the render */
     virtual void render(const OFX::RenderArguments& p_Args);
 
     /* Set up and run a processor */
-    void setupAndProcess(DynamicTransform &p_DynamicTransform, const OFX::RenderArguments& p_Args);
+    void setupAndProcess(DynamicTransform& p_DynamicTransform, const OFX::RenderArguments& p_Args);
+
+    double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::DoubleParam* rateG, double timeIn, double timeOut, double fr, bool isWiggle);
+
+    double processToTime(int instance, int offset, OFX::DoubleParam* param, double timeIn, double timeOut, double fr, OFX::DoubleParam* a, OFX::DoubleParam* b, OFX::BooleanParam* bounce);
+    void processToTime2D(int instance, int offset, OFX::Double2DParam* param, double timeIn, double timeOut, double fr, OFX::DoubleParam* a, OFX::DoubleParam* b, OFX::BooleanParam* bounce, double* paramOut);
+
+    void changedParam(
+        const OFX::InstanceChangedArgs& args,
+        const std::string& param_name) override;
 
     virtual void getClipPreferences(OFX::ClipPreferencesSetter& clipPreferences);
 
 private:
+
+    double lastTime = 0;
+    double lastVel[18] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    double lastVel2[18] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    double lastValue[18] = { 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1 };
+    double lastValue2[18] = { 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1 };
+    double lastRate[18] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    double lastRate2[18] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    double lastRateW[18] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+    double lastRateW2[18] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
     // Does not own the following pointers
     OFX::Clip* m_DstClip;
     OFX::Clip* m_SrcClip;
@@ -621,6 +672,9 @@ private:
     OFX::IntParam* m_HasParent;
     OFX::DoubleParam* m_Px;
     OFX::DoubleParam* m_Py;
+    OFX::DoubleParam* m_Ptx;
+    OFX::DoubleParam* m_Pty;
+    OFX::Double2DParam* m_Pxy;
     OFX::DoubleParam* m_Pz;
     OFX::DoubleParam* m_Rx;
     OFX::DoubleParam* m_Ry;
@@ -628,6 +682,13 @@ private:
     OFX::DoubleParam* m_Sx;
     OFX::DoubleParam* m_Sy;
     OFX::DoubleParam* m_Sz;
+    OFX::DoubleParam* m_Ptz;
+    OFX::DoubleParam* m_Rtx;
+    OFX::DoubleParam* m_Rty;
+    OFX::DoubleParam* m_Rtz;
+    OFX::DoubleParam* m_Stx;
+    OFX::DoubleParam* m_Sty;
+    OFX::DoubleParam* m_Stz;
     OFX::DoubleParam* m_WPx;
     OFX::DoubleParam* m_WPy;
     OFX::DoubleParam* m_WPz;
@@ -686,22 +747,28 @@ private:
     OFX::ChoiceParam* m_WrapY;
     OFX::BooleanParam* m_WrapZ;
     OFX::BooleanParam* m_xRatio;
+    OFX::BooleanParam* m_XYToggle;
     OFX::DoubleParam* m_Blur;
+    OFX::DoubleParam* m_BoundX1;
+    OFX::DoubleParam* m_BoundX2;
+    OFX::DoubleParam* m_BoundY1;
+    OFX::DoubleParam* m_BoundY2;
     int instanceHandle;
 };
 
-static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::DoubleParam* rateG, double timeIn, double timeOut, double fr, bool isWiggle) {
-    int index = instance * 18 + offset;
+double TransformGPU::rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::DoubleParam* rateG, double timeIn, double timeOut, double fr, bool isWiggle) {
+
+    int index = offset;
     double d = 0.;
     double p, inTime;
-    if (lastTime[instance] > timeOut || timeOut == timeIn || lastTime[instance] == 0.) {
+    if (lastTime > timeOut || timeOut == timeIn || lastTime == 0.) {
         p = 0.;
         inTime = timeIn;
     }
     else {
         if (isWiggle) {
             p = lastRateW[index];
-            inTime = lastTime[instance];
+            inTime = lastTime;
             // if (offset > 8) {
             //     inTime += 1.;
             //     p = lastRateW2[index];
@@ -709,7 +776,7 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
         }
         else {
             p = lastRate[index];
-            inTime = lastTime[instance];
+            inTime = lastTime;
             // if (offset > 8) {
             //     inTime += 1.;
             //     p = lastRate2[index];
@@ -732,7 +799,8 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
     lockes.Lock();
     if (isWiggle) {
         lastRateW[index] = p;
-    } else {
+    }
+    else {
         lastRate[index] = p;
     }
     lockes.Unlock();
@@ -743,11 +811,11 @@ static double rateScalar(int instance, int offset, OFX::DoubleParam* rate, OFX::
     return p;
 }
 
-static double processToTime(int instance, int offset, OFX::DoubleParam* param, double timeIn, double timeOut, double fr, OFX::DoubleParam* a, OFX::DoubleParam* b, OFX::BooleanParam* bounce)
+double TransformGPU::processToTime(int instance, int offset, OFX::DoubleParam* param, double timeIn, double timeOut, double fr, OFX::DoubleParam* a, OFX::DoubleParam* b, OFX::BooleanParam* bounce)
 {
-    int index = instance * 18 + offset;
+    int index = offset;
     double result, vel, inTime, value0, value1;
-    if (lastTime[instance] >= timeOut || timeOut == timeIn || lastTime[instance] == 0.) {
+    if (lastTime >= timeOut || timeOut == timeIn || lastTime == 0.) {
         // first set            p_Args.time               second set              p_Args.time + 1.
         vel = 0.;
         inTime = timeIn;
@@ -758,7 +826,7 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
     else {
         result = lastValue[index];
         vel = lastVel[index];
-        inTime = lastTime[instance];
+        inTime = lastTime;
         value0 = lastValue2[index];
         value1 = param->getValueAtTime(inTime - 1.);
         // if (offset > 8) {
@@ -776,7 +844,7 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
     for (double i = inTime + 1.; i <= timeOut; i += 1.) { // += fr / 240.
         value0 = value1 != value ? value1 : value0;
         //           0?       p_Args.time(+1)
-        tempo = pow(tempo, log2(1.+fr/15.)); // 64. (retain functionality)
+        tempo = pow(tempo, log2(1. + fr / 15.)); // 64. (retain functionality)
         // vel = bounc ? fabs(vel) : vel;
         diff = value - result;
         vel += diff * tempo;
@@ -822,7 +890,119 @@ static double processToTime(int instance, int offset, OFX::DoubleParam* param, d
 
     return result;
 }
-
+void TransformGPU::processToTime2D(int instance, int offset, OFX::Double2DParam* param, double timeIn, double timeOut, double fr, OFX::DoubleParam* a, OFX::DoubleParam* b, OFX::BooleanParam* bounce, double* paramOut)
+{
+    double result[2]{}, vel[2]{}, inTime, value0[2]{}, value1[2]{};
+        int index = offset;
+        if (lastTime >= timeOut || timeOut == timeIn || lastTime == 0.) {
+            // first set            p_Args.time               second set              p_Args.time + 1.
+            vel[0] = 0.;
+            vel[1] = 0.;
+            inTime = timeIn;
+            param->getValueAtTime(timeIn, result[0], result[1]);
+            value0[0] = 0.;
+            value0[1] = 0.;
+            value1[0] = 0.;
+            value1[1] = 0.;
+        }
+        else {
+            result[0] = lastValue[index];
+            result[1] = lastValue[index+1];
+            vel[0] = lastVel[index];
+            vel[1] = lastVel[index+1];
+            inTime = lastTime;
+            value0[0] = lastValue2[index];
+            value0[1] = lastValue2[index+1];
+            param->getValueAtTime(inTime - 1., value1[0], value1[1]);
+            // if (offset > 8) {
+            //     inTime += 1.;
+            //     result = lastValue2[index];
+            //     vel = lastVel2[index];
+            // }
+        }
+        double phase = 0.;
+        double value[2]{};
+        param->getValueAtTime(inTime, value[0], value[1]);
+        double diff[2] = { 0., 0. };
+        double tempo = a->getValueAtTime(inTime);
+        double elast = b->getValueAtTime(inTime);
+        bool bounc = bounce->getValueAtTime(inTime);
+            for (double i = inTime + 1.; i <= timeOut; i += 1.) { // += fr / 240.
+                value0[0] = value1[0] != value[0] ? value1[0] : value0[0];
+                value0[1] = value1[1] != value[1] ? value1[1] : value0[1];
+                //           0?       p_Args.time(+1)
+                tempo = pow(tempo, log2(1. + fr / 15.)); // 64. (retain functionality)
+                // vel = bounc ? fabs(vel) : vel;
+                diff[0] = value[0] - result[0];
+                diff[1] = value[1] - result[1];
+                vel[0] += diff[0] * tempo;
+                vel[1] += diff[1] * tempo;
+                result[0] = result[0] * (1. - tempo) + value[0] * tempo;
+                result[1] = result[1] * (1. - tempo) + value[1] * tempo;
+                result[0] += vel[0] * elast * tempo;
+                result[1] += vel[1] * elast * tempo;
+                double polarity = ceil(value[0] - value0[0]) * 2. - 1.;
+                polarity = polarity > 0. ? 1. : -1.;
+                if (bounc && diff[0] * polarity < 0.) {
+                    result[0] = value[0];
+                    vel[0] *= -1.;
+                }
+                polarity = ceil(value[1] - value0[1]) * 2. - 1.;
+                polarity = polarity > 0. ? 1. : -1.;
+                if (bounc && diff[1] * polarity < 0.) {
+                    result[1] = value[1];
+                    vel[1] *= -1.;
+                }
+                value1[0] = value[0];
+                value1[1] = value[1];
+                param->getValueAtTime(i, value[0], value[1]);
+                tempo = a->getValueAtTime(i);
+                elast = b->getValueAtTime(i);
+                bounc = bounce->getValueAtTime(i);
+            }
+        static Locker lockes;
+        lockes.Lock();
+        lastValue[index] = result[0];
+        lastValue[index+1] = result[1];
+        lastValue2[index] = value0[0];
+        lastValue2[index+1] = value0[1];
+        lastVel[index] = vel[0];
+        lastVel[index+1] = vel[1];
+        lockes.Unlock();
+        if (offset > 8) {
+            param->getValueAtTime(timeOut + 1., value[0], value[1]);
+            tempo = a->getValueAtTime(timeOut + 1.);
+            elast = b->getValueAtTime(timeOut + 1.);
+            bounc = bounce->getValueAtTime(timeOut + 1.);
+            value0[0] = value1[0] != value[0] ? value1[0] : value0[0];
+            value0[1] = value1[1] != value[1] ? value1[1] : value0[1];
+            //           0?       p_Args.time(+1)
+            tempo = pow(tempo, log2(1. + fr / 15.)); // 64. (retain functionality)
+            // vel = bounc ? fabs(vel) : vel;
+            diff[0] = value[0] - result[0];
+            diff[1] = value[1] - result[1];
+            vel[0] += diff[0] * tempo;
+            vel[1] += diff[1] * tempo;
+            result[0] = result[0] * (1. - tempo) + value[0] * tempo;
+            result[1] = result[1] * (1. - tempo) + value[1] * tempo;
+            result[0] += vel[0] * elast * tempo;
+            result[1] += vel[1] * elast * tempo;
+            double polarity = ceil(value[0] - value0[0]) * 2. - 1.;
+            polarity = polarity > 0. ? 1. : -1.;
+            if (bounc&& diff[0] * polarity < 0.) {
+                result[0] = value[0];
+                vel[0] *= -1.;
+            }
+            polarity = ceil(value[1] - value0[1]) * 2. - 1.;
+            polarity = polarity > 0. ? 1. : -1.;
+            if (bounc && diff[1] * polarity < 0.) {
+                result[1] = value[1];
+                vel[1] *= -1.;
+            }
+        }
+        paramOut[0] = result[0];
+        paramOut[1] = result[1];
+}
 static double oscillate(double t, double p) {
     return sin(((t / 60.) + p) * 3.14159265 * 2.);
 }
@@ -872,7 +1052,7 @@ static double wiggle(double seed, double offset, double t, int oct)
 {
     double n = 0.;
     for (int i = 0; i < oct; i++) {
-        n += ((perlin((t / 60. + offset) * pow(2., double(i)), seed*(i+1), 277.94*offset)) + 1.) / pow(2., double(i));
+        n += ((perlin((t / 60. + offset) * pow(2., double(i)), seed * (i + 1), 277.94 * offset)) + 1.) / pow(2., double(i));
     }
     return n / 2.;
 }
@@ -976,47 +1156,19 @@ static inline std::vector<double> getMatrix(std::vector<double> m, double rx, do
     return o;
 }
 
-static inline int threadQuery(std::thread::id threadId)
-{
-    static std::map<std::thread::id, int> threadIO;
-    int theThread = 0;
-    std::map<std::thread::id, int>::iterator iter = threadIO.find(threadId);
-    if (iter == threadIO.end())
-    {
-        theThread = threadIO.size();
-        threadIO[threadId] = theThread;
-    }
-    else {
-        theThread = std::distance(threadIO.begin(), iter);
-    }
-    return theThread;
-}
-
-static inline int imageQuery(OfxImageEffectHandle image)
-{
-    static std::map<OfxImageEffectHandle, int> threadIO;
-    int theImage = 0;
-    std::map<OfxImageEffectHandle, int>::iterator iter = threadIO.find(image);
-    if (iter == threadIO.end())
-    {
-        theImage = threadIO.size();
-        threadIO[image] = theImage;
-    }
-    else {
-        theImage = std::distance(threadIO.begin(), iter);
-    }
-    return theImage;
-}
-
 
 TransformGPU::TransformGPU(OfxImageEffectHandle p_Handle)
     : ImageEffect(p_Handle)
-{ 
+{
     m_DstClip = fetchClip(kOfxImageEffectOutputClipName);
     m_SrcClip = fetchClip(kOfxImageEffectSimpleSourceClipName);
 
     m_Px = fetchDoubleParam("posX");
     m_Py = fetchDoubleParam("posY");
+    m_Pty = fetchDoubleParam("ptY");
+    m_Ptx = fetchDoubleParam("ptX");
+    m_Pxy = fetchDouble2DParam("posXY");
+    m_XYToggle = fetchBooleanParam("xyToggle");
     m_Pz = fetchDoubleParam("posZ");
     m_Rx = fetchDoubleParam("rotX");
     m_Ry = fetchDoubleParam("rotY");
@@ -1024,6 +1176,13 @@ TransformGPU::TransformGPU(OfxImageEffectHandle p_Handle)
     m_Sx = fetchDoubleParam("sclX");
     m_Sy = fetchDoubleParam("sclY");
     m_Sz = fetchDoubleParam("sclZ");
+    m_Ptz = fetchDoubleParam("ptZ");
+    m_Rtx = fetchDoubleParam("rtX");
+    m_Rty = fetchDoubleParam("rtY");
+    m_Rtz = fetchDoubleParam("rtZ");
+    m_Stx = fetchDoubleParam("stX");
+    m_Sty = fetchDoubleParam("stY");
+    m_Stz = fetchDoubleParam("stZ");
     m_WPx = fetchDoubleParam("wPosX");
     m_WPy = fetchDoubleParam("wPosY");
     m_WPz = fetchDoubleParam("wPosZ");
@@ -1087,7 +1246,11 @@ TransformGPU::TransformGPU(OfxImageEffectHandle p_Handle)
     m_HasParent = fetchIntParam("hasParent");
     m_Temp = fetchDoubleParam("tempo");
     m_Elast = fetchDoubleParam("elast");
-    instanceHandle = imageQuery(p_Handle);
+    m_BoundX1 = fetchDoubleParam("boundX1");
+    m_BoundX2 = fetchDoubleParam("boundX2");
+    m_BoundY1 = fetchDoubleParam("boundY1");
+    m_BoundY2 = fetchDoubleParam("boundY2");
+    // instanceHandle = imageQuery(p_Handle);
 }
 
 void TransformGPU::render(const OFX::RenderArguments& p_Args)
@@ -1104,9 +1267,264 @@ void TransformGPU::render(const OFX::RenderArguments& p_Args)
     }
 }
 
+void TransformGPU::changedParam(const OFX::InstanceChangedArgs& args, const std::string& param_name) {
+    if (param_name == "bake") {
+
+        int keysAdded = 0;
+        const OfxRangeD srcRange = m_SrcClip->getFrameRange();
+        double tIn = srcRange.min;
+        double tOut = srcRange.max;
+        OfxRectD myBounds = m_SrcClip->getRegionOfDefinition(tIn);
+        double xyToggle = m_XYToggle->getValue();
+        double ratio = (myBounds.x2 - myBounds.x1) / (myBounds.y2 - myBounds.y1);
+
+        for (double f = tIn; f <= tOut; f += 1.0) {
+            double xRtio = m_xRatio->getValueAtTime(f);
+            double pxws = m_WPx->getValueAtTime(f);
+            double pyws = m_WPy->getValueAtTime(f);
+            double pzws = m_WPz->getValueAtTime(f);
+            double rxws = m_WRx->getValueAtTime(f) / 180.;
+            double ryws = m_WRy->getValueAtTime(f) / 180.;
+            double rzws = m_WRz->getValueAtTime(f) / 180.;
+            double sxws = m_WSx->getValueAtTime(f);
+            double syws = m_WSy->getValueAtTime(f);
+            double szws = m_WSz->getValueAtTime(f);
+            double pxos = m_OPx->getValueAtTime(f);
+            double pyos = m_OPy->getValueAtTime(f);
+            double pzos = m_OPz->getValueAtTime(f);
+            double rxos = m_ORx->getValueAtTime(f) / 180.;
+            double ryos = m_ORy->getValueAtTime(f) / 180.;
+            double rzos = m_ORz->getValueAtTime(f) / 180.;
+            double sxos = m_OSx->getValueAtTime(f);
+            double syos = m_OSy->getValueAtTime(f);
+            double szos = m_OSz->getValueAtTime(f);
+            double wstr = m_WGl->getValueAtTime(f);
+            double ostr = m_OGl->getValueAtTime(f);
+
+            pxos *= ostr;
+            pyos *= ostr;
+            pzos *= ostr;
+            rxos *= ostr;
+            ryos *= ostr;
+            rzos *= ostr;
+            sxos *= ostr;
+            syos *= ostr;
+            szos *= ostr;
+            pxws *= wstr;
+            pyws *= wstr;
+            pzws *= wstr;
+            rxws *= wstr;
+            ryws *= wstr;
+            rzws *= wstr;
+            sxws *= wstr;
+            syws *= wstr;
+            szws *= wstr;
+
+            double pxop = m_OpPx->getValueAtTime(f);
+            double pyop = m_OpPy->getValueAtTime(f);
+            double pzop = m_OpPz->getValueAtTime(f);
+            double rxop = m_OpRx->getValueAtTime(f);
+            double ryop = m_OpRy->getValueAtTime(f);
+            double rzop = m_OpRz->getValueAtTime(f);
+            double sxop = m_OpSx->getValueAtTime(f);
+            double syop = m_OpSy->getValueAtTime(f);
+            double szop = m_OpSz->getValueAtTime(f);
+
+            double seed = m_WSeed->getValueAtTime(f);
+            int octs = m_WOct->getValueAtTime(f);
+            double seedFactor = 10000 / 83.f; // arbitrarily odd value
+
+            double px0, py0, pz0, rx0, ry0, rz0, sx0, sy0, sz0;
+
+            if (xyToggle) {
+                double xy[2] = {0, 0};
+                processToTime2D(0, 0, m_Pxy, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce, xy);
+                px0 = -xy[0];
+                py0 = -xy[1];
+            }
+            else {
+                px0 = processToTime(0, 0, m_Px, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+                py0 = processToTime(0, 1, m_Py, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+            }
+            pz0 = processToTime(0, 2, m_Pz, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+            rx0 = processToTime(0, 3, m_Rx, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+            ry0 = processToTime(0, 4, m_Ry, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+            rz0 = processToTime(0, 5, m_Rz, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+            sx0 = processToTime(0, 6, m_Sx, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+            sy0 = processToTime(0, 7, m_Sy, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+            sz0 = processToTime(0, 8, m_Sz, tIn, f, frameRate, m_Temp, m_Elast, m_Bounce);
+
+            px0 += wiggle(seed, 1. * seedFactor, rateScalar(0, 0, m_WrPx, m_WrGl, tIn, f, frameRate, true), octs) * pxws;
+            py0 += wiggle(seed, 2. * seedFactor, rateScalar(0, 1, m_WrPy, m_WrGl, tIn, f, frameRate, true), octs) * pyws;
+            pz0 += wiggle(seed, 3. * seedFactor, rateScalar(0, 2, m_WrPz, m_WrGl, tIn, f, frameRate, true), octs) * pzws;
+            rx0 += wiggle(seed, 4. * seedFactor, rateScalar(0, 3, m_WrRx, m_WrGl, tIn, f, frameRate, true), octs) * rxws * 180.;
+            ry0 += wiggle(seed, 5. * seedFactor, rateScalar(0, 4, m_WrRy, m_WrGl, tIn, f, frameRate, true), octs) * ryws * 180.;
+            rz0 += wiggle(seed, 6. * seedFactor, rateScalar(0, 5, m_WrRz, m_WrGl, tIn, f, frameRate, true), octs) * rzws * 180.;
+            sx0 += wiggle(seed, 7. * seedFactor, rateScalar(0, 6, m_WrSx, m_WrGl, tIn, f, frameRate, true), octs) * sxws;
+            sy0 += wiggle(seed, 8. * seedFactor, rateScalar(0, 7, m_WrSy, m_WrGl, tIn, f, frameRate, true), octs) * syws;
+            sz0 += wiggle(seed, 9. * seedFactor, rateScalar(0, 8, m_WrSz, m_WrGl, tIn, f, frameRate, true), octs) * szws;
+            
+            px0 += oscillate(rateScalar(0, 0, m_OrPx, m_OrGl, tIn, f, frameRate, false), pxop) * pxos;
+            py0 += oscillate(rateScalar(0, 1, m_OrPy, m_OrGl, tIn, f, frameRate, false), pyop) * pyos;
+            pz0 += oscillate(rateScalar(0, 2, m_OrPz, m_OrGl, tIn, f, frameRate, false), pzop) * pzos;
+            rx0 += oscillate(rateScalar(0, 3, m_OrRx, m_OrGl, tIn, f, frameRate, false), rxop) * rxos * 180.;
+            ry0 += oscillate(rateScalar(0, 4, m_OrRy, m_OrGl, tIn, f, frameRate, false), ryop) * ryos * 180.;
+            rz0 += oscillate(rateScalar(0, 5, m_OrRz, m_OrGl, tIn, f, frameRate, false), rzop) * rzos * 180.;
+            sx0 += oscillate(rateScalar(0, 6, m_OrSx, m_OrGl, tIn, f, frameRate, false), sxop) * sxos;
+            sy0 += oscillate(rateScalar(0, 7, m_OrSy, m_OrGl, tIn, f, frameRate, false), syop) * syos;
+            sz0 += oscillate(rateScalar(0, 8, m_OrSz, m_OrGl, tIn, f, frameRate, false), szop) * szos;
+
+            if (!xRtio)
+            {
+                px0 /= ratio;
+            }
+            lastTime = f;
+            m_Ptx->setValueAtTime(f, px0);
+            m_Pty->setValueAtTime(f, py0);
+            m_Ptz->setValueAtTime(f, pz0);
+            m_Rtx->setValueAtTime(f, rx0);
+            m_Rty->setValueAtTime(f, ry0);
+            m_Rtz->setValueAtTime(f, rz0);
+            m_Stx->setValueAtTime(f, sx0);
+            m_Sty->setValueAtTime(f, sy0);
+            m_Stz->setValueAtTime(f, sz0);
+            keysAdded++;
+        }
+        m_Pxy->deleteAllKeys();
+        m_Px->deleteAllKeys();
+        m_Py->deleteAllKeys();
+        m_Pz->deleteAllKeys();
+        m_Rx->deleteAllKeys();
+        m_Ry->deleteAllKeys();
+        m_Rz->deleteAllKeys();
+        m_Sx->deleteAllKeys();
+        m_Sy->deleteAllKeys();
+        m_Sz->deleteAllKeys();
+        for (double f = tIn; f <= tOut; f += 1.0) {
+            m_Pxy->setValueAtTime(f, m_Ptx->getValueAtTime(f) * -1., m_Pty->getValueAtTime(f) * -1.);
+            m_Px->setValueAtTime(f, m_Ptx->getValueAtTime(f));
+            m_Py->setValueAtTime(f, m_Pty->getValueAtTime(f));
+            m_Pz->setValueAtTime(f, m_Ptz->getValueAtTime(f));
+            m_Rx->setValueAtTime(f, m_Rtx->getValueAtTime(f));
+            m_Ry->setValueAtTime(f, m_Rty->getValueAtTime(f));
+            m_Rz->setValueAtTime(f, m_Rtz->getValueAtTime(f));
+            m_Sx->setValueAtTime(f, m_Stx->getValueAtTime(f));
+            m_Sy->setValueAtTime(f, m_Sty->getValueAtTime(f));
+            m_Sz->setValueAtTime(f, m_Stz->getValueAtTime(f));
+        }
+        m_Ptx->deleteAllKeys();
+        m_Ptz->deleteAllKeys();
+        m_Pty->deleteAllKeys();
+        m_Rtx->deleteAllKeys();
+        m_Rty->deleteAllKeys();
+        m_Rtz->deleteAllKeys();
+        m_Stx->deleteAllKeys();
+        m_Sty->deleteAllKeys();
+        m_Stz->deleteAllKeys();
+        m_WPx->deleteAllKeys();
+        m_WPy->deleteAllKeys();
+        m_WPz->deleteAllKeys();
+        m_WRx->deleteAllKeys();
+        m_WRy->deleteAllKeys();
+        m_WRz->deleteAllKeys();
+        m_WSx->deleteAllKeys();
+        m_WSy->deleteAllKeys();
+        m_WSz->deleteAllKeys();
+        m_WrPx->deleteAllKeys();
+        m_WrPy->deleteAllKeys();
+        m_WrPz->deleteAllKeys();
+        m_WrRx->deleteAllKeys();
+        m_WrRy->deleteAllKeys();
+        m_WrRz->deleteAllKeys();
+        m_WrSx->deleteAllKeys();
+        m_WrSy->deleteAllKeys();
+        m_WrSz->deleteAllKeys();
+        m_WGl->deleteAllKeys();
+        m_WrGl->deleteAllKeys();
+        m_OPx->deleteAllKeys();
+        m_OPy->deleteAllKeys();
+        m_OPz->deleteAllKeys();
+        m_ORx->deleteAllKeys();
+        m_ORy->deleteAllKeys();
+        m_ORz->deleteAllKeys();
+        m_OSx->deleteAllKeys();
+        m_OSy->deleteAllKeys();
+        m_OSz->deleteAllKeys();
+        m_OrPx->deleteAllKeys();
+        m_OrPy->deleteAllKeys();
+        m_OrPz->deleteAllKeys();
+        m_OrRx->deleteAllKeys();
+        m_OrRy->deleteAllKeys();
+        m_OrRz->deleteAllKeys();
+        m_OrSx->deleteAllKeys();
+        m_OrSy->deleteAllKeys();
+        m_OrSz->deleteAllKeys();
+        m_OpPx->deleteAllKeys();
+        m_OpPy->deleteAllKeys();
+        m_OpPz->deleteAllKeys();
+        m_OpRx->deleteAllKeys();
+        m_OpRy->deleteAllKeys();
+        m_OpRz->deleteAllKeys();
+        m_OpSx->deleteAllKeys();
+        m_OpSy->deleteAllKeys();
+        m_OpSz->deleteAllKeys();
+        m_OGl->deleteAllKeys();
+        m_OrGl->deleteAllKeys();
+        m_WPx->setValue(0.);
+        m_WPy->setValue(0.);
+        m_WPz->setValue(0.);
+        m_WRx->setValue(0.);
+        m_WRy->setValue(0.);
+        m_WRz->setValue(0.);
+        m_WSx->setValue(0.);
+        m_WSy->setValue(0.);
+        m_WSz->setValue(0.);
+        m_WrPx->setValue(0.);
+        m_WrPy->setValue(0.);
+        m_WrPz->setValue(0.);
+        m_WrRx->setValue(0.);
+        m_WrRy->setValue(0.);
+        m_WrRz->setValue(0.);
+        m_WrSx->setValue(0.);
+        m_WrSy->setValue(0.);
+        m_WrSz->setValue(0.);
+        m_WGl->setValue(1.);
+        m_WrGl->setValue(1.);
+        m_OPx->setValue(0.);
+        m_OPy->setValue(0.);
+        m_OPz->setValue(0.);
+        m_ORx->setValue(0.);
+        m_ORy->setValue(0.);
+        m_ORz->setValue(0.);
+        m_OSx->setValue(0.);
+        m_OSy->setValue(0.);
+        m_OSz->setValue(0.);
+        m_OrPx->setValue(0.);
+        m_OrPy->setValue(0.);
+        m_OrPz->setValue(0.);
+        m_OrRx->setValue(0.);
+        m_OrRy->setValue(0.);
+        m_OrRz->setValue(0.);
+        m_OrSx->setValue(0.);
+        m_OrSy->setValue(0.);
+        m_OrSz->setValue(0.);
+        m_OGl->setValue(1.);
+        m_OrGl->setValue(1.);
+        m_Elast->deleteAllKeys();
+        m_Temp->deleteAllKeys();
+        m_Elast->setValue(0.);
+        m_Temp->setValue(1.);
+        m_XYToggle->setValue(false);
+        m_xRatio->deleteAllKeys();
+        m_xRatio->setValue(true);
+        
+        // reset temporal params
+        // reset XYmodew
+    }
+}
+
 void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const OFX::RenderArguments& p_Args)
 {
-
     static Locker locken;
     double PI = 3.14159265358979323846;
     // Get the dst image
@@ -1118,24 +1536,20 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     std::unique_ptr<OFX::Image> src(m_SrcClip->fetchImage(p_Args.time));
     OFX::BitDepthEnum srcBitDepth = src->getPixelDepth();
     OFX::PixelComponentEnum srcComponents = src->getPixelComponents();
-    
+
 
     // Check to see if the bit depth and number of components are the same
     if ((srcBitDepth != dstBitDepth) || (srcComponents != dstComponents))
     {
         OFX::throwSuiteStatusException(kOfxStatErrValue);
     }
-    for (int i = 0; i < INSTANCE_COUNT; i++) {
-        instanceStarted[i] = 0;
-    }
+
     int thisThread = 0; // this variable is pointless
     transformIndex = thisThread;
-    int instanceIndex = instanceHandle % INSTANCE_COUNT;
-
-    instanceStarted[instanceIndex] = instanceStarted[instanceIndex] == 0 ? 1 : 2;
+    int instanceIndex = instanceHandle;
 
     double t1 = m_SrcClip->getFrameRange().min;
-    double frameRate = m_SrcClip->getFrameRate();
+    frameRate = m_DstClip->getFrameRate();
     OfxRectD myBounds = m_SrcClip->getRegionOfDefinition(p_Args.time);
     double ratio = (myBounds.x2 - myBounds.x1) / (myBounds.y2 - myBounds.y1);
 
@@ -1146,13 +1560,19 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     m_WrapX->getValueAtTime(p_Args.time, wx);
     m_WrapY->getValueAtTime(p_Args.time, wy);
     bool wz = m_WrapZ->getValueAtTime(p_Args.time);
+    bool xyToggle = m_XYToggle->getValueAtTime(p_Args.time);
     bool xRtio = m_xRatio->getValueAtTime(p_Args.time);
     int pIndex = m_HasParent->getValueAtTime(p_Args.time);
     int pSend = m_IsParent->getValueAtTime(p_Args.time);
-    double bParams[25];
+    double bParams[25]{};
     int wzInt = wz ? 1 : 0;
 
-    double mb = m_Blur->getValueAtTime(p_Args.time); 
+    double boundX1 = m_BoundX1->getValueAtTime(p_Args.time);
+    double boundX2 = m_BoundX2->getValueAtTime(p_Args.time);
+    double boundY1 = m_BoundY1->getValueAtTime(p_Args.time);
+    double boundY2 = m_BoundY2->getValueAtTime(p_Args.time);
+
+    double mb = m_Blur->getValueAtTime(p_Args.time);
     double pxws = m_WPx->getValueAtTime(p_Args.time);
     double pyws = m_WPy->getValueAtTime(p_Args.time);
     double pzws = m_WPz->getValueAtTime(p_Args.time);
@@ -1205,12 +1625,20 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
 
     double seed = m_WSeed->getValueAtTime(p_Args.time);
     int octs = m_WOct->getValueAtTime(p_Args.time);
-    double seedFactor = 10000 / 83; // arbitrarily odd value
+    double seedFactor = 10000 / 83.f; // arbitrarily odd value
 
     double px0, py0, pz0, rx0, ry0, rz0, sx0, sy0, sz0, px1, py1, pz1, rx1, ry1, rz1, sx1, sy1, sz1;
 
-    px0 = processToTime(instanceIndex, 0, m_Px, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    py0 = processToTime(instanceIndex, 1, m_Py, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    if (xyToggle) {
+        double xy[2] = { 0, 0 };
+        processToTime2D(instanceIndex, 0, m_Pxy, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce, xy);
+        px0 = -xy[0];
+        py0 = -xy[1];
+    }
+    else {
+        px0 = processToTime(instanceIndex, 0, m_Px, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+        py0 = processToTime(instanceIndex, 1, m_Py, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    }
     pz0 = processToTime(instanceIndex, 2, m_Pz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
     rx0 = processToTime(instanceIndex, 3, m_Rx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
     ry0 = processToTime(instanceIndex, 4, m_Ry, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
@@ -1219,8 +1647,17 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     sy0 = processToTime(instanceIndex, 7, m_Sy, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
     sz0 = processToTime(instanceIndex, 8, m_Sz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
 
-    px1 = processToTime(instanceIndex, 9, m_Px, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
-    py1 = processToTime(instanceIndex, 10, m_Py, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+
+    if (xyToggle) {
+        double xy[2] = { 0, 0 };
+        processToTime2D(instanceIndex, 9, m_Pxy, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce, xy);
+        px1 = -xy[0];
+        py1 = -xy[1];
+    }
+    else {
+        px1 = processToTime(instanceIndex, 9, m_Px, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+        py1 = processToTime(instanceIndex, 10, m_Py, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
+    }
     pz1 = processToTime(instanceIndex, 11, m_Pz, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
     rx1 = processToTime(instanceIndex, 12, m_Rx, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
     ry1 = processToTime(instanceIndex, 13, m_Ry, t1, p_Args.time, frameRate, m_Temp, m_Elast, m_Bounce);
@@ -1275,7 +1712,7 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
         px1 *= ratio;
     }
     locken.Lock();
-    lastTime[instanceIndex] = p_Args.time;
+    lastTime = p_Args.time;
     locken.Unlock();
     // parameters end here
 
@@ -1301,7 +1738,7 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     std::vector<double> pp1 = { 0.,0.,0. };
     float mb0 = mb;
     if (pIndex != 0) {
-        float pParams[25];
+        float pParams[25]{};
         for (int i = 0; i < 25; i++) {
             if (p_Args.isEnabledOpenCLRender) {
                 pParams[i] = buffers[thisThread][pIndex - 1][i];
@@ -1366,8 +1803,6 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     bParams[24] = mb0;
     int bitDepth = srcBitDepth == OFX::eBitDepthUByte ? 8 : 32;
 
-    p_DynamicTransform.setScales(bParams[0], bParams[1], bParams[2], bParams[3], bParams[4], bParams[5], bParams[6], bParams[7], bParams[8], bParams[9], bParams[10], bParams[11], bParams[12], bParams[13], bParams[14], bParams[15], bParams[16], bParams[17], bParams[18], bParams[19], bParams[20], bParams[21], bParams[22], bParams[23], wx, wy, wz, bParams[24], sx0, sy0, sz0, rx0, ry0, sz0, pIndex, pSend, thisThread, off, fwd, bitDepth);
-
     // Set the images
     p_DynamicTransform.setDstImg(dst.get());
     p_DynamicTransform.setSrcImg(src.get());
@@ -1378,8 +1813,16 @@ void TransformGPU::setupAndProcess(DynamicTransform& p_DynamicTransform, const O
     // Set the render window
     p_DynamicTransform.setRenderWindow(p_Args.renderWindow);
 
+    bool clCheck = !p_Args.isEnabledOpenCLRender && postCLCheck();
+    p_DynamicTransform.setScales(bParams[0], bParams[1], bParams[2], bParams[3], bParams[4], bParams[5], bParams[6], bParams[7], bParams[8], bParams[9], bParams[10], bParams[11], bParams[12], bParams[13], bParams[14], bParams[15], bParams[16], bParams[17], bParams[18], bParams[19], bParams[20], bParams[21], bParams[22], bParams[23], wx, wy, wz, bParams[24], sx0, sy0, sz0, rx0, ry0, sz0, pIndex, pSend, thisThread, off, fwd, bitDepth, clCheck, boundX1, boundX2, boundY1, boundY2);
+
     // Call the base class process member, this will call the derived templated process code
-    p_DynamicTransform.process();
+    if (clCheck) {
+        p_DynamicTransform.processImagesOpenCL();
+    }
+    else {
+        p_DynamicTransform.process();
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1420,13 +1863,12 @@ void TransformGPUFactory::describe(OFX::ImageEffectDescriptor& p_Desc)
     p_Desc.setSupportsMultipleClipPARs(kSupportsMultipleClipPARs);
 
     // Setup OpenCL render capability flags
-    p_Desc.setSupportsOpenCLBuffersRender(true);
     p_Desc.setSupportsOpenCLImagesRender(true);
-
+    p_Desc.setSupportsOpenCLBuffersRender(true);
 }
 
 static DoubleParamDescriptor* newDoubleParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
-                                               const std::string& p_Hint, GroupParamDescriptor* p_Parent, double p_RMin, double p_VMin, double p_Default, double p_VMax, double p_RMax)
+    const std::string& p_Hint, GroupParamDescriptor* p_Parent, double p_RMin, double p_VMin, double p_Default, double p_VMax, double p_RMax)
 {
     DoubleParamDescriptor* param = p_Desc.defineDoubleParam(p_Name);
     param->setLabels(p_Label, p_Label, p_Label);
@@ -1445,7 +1887,7 @@ static DoubleParamDescriptor* newDoubleParam(OFX::ImageEffectDescriptor& p_Desc,
     return param;
 }
 static IntParamDescriptor* newIntParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
-                                               const std::string& p_Hint, GroupParamDescriptor* p_Parent, int p_RMin, int p_VMin, int p_Default, int p_VMax, int p_RMax)
+    const std::string& p_Hint, GroupParamDescriptor* p_Parent, int p_RMin, int p_VMin, int p_Default, int p_VMax, int p_RMax)
 {
     IntParamDescriptor* param = p_Desc.defineIntParam(p_Name);
     param->setLabels(p_Label, p_Label, p_Label);
@@ -1463,7 +1905,7 @@ static IntParamDescriptor* newIntParam(OFX::ImageEffectDescriptor& p_Desc, const
     return param;
 }
 static BooleanParamDescriptor* newBoolParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
-                                               const std::string& p_Hint, GroupParamDescriptor* p_Parent, bool p_Default)
+    const std::string& p_Hint, GroupParamDescriptor* p_Parent, bool p_Default)
 {
     BooleanParamDescriptor* param = p_Desc.defineBooleanParam(p_Name);
     param->setLabels(p_Label, p_Label, p_Label);
@@ -1480,7 +1922,7 @@ static BooleanParamDescriptor* newBoolParam(OFX::ImageEffectDescriptor& p_Desc, 
 
 }
 static ChoiceParamDescriptor* newChoiceParam(OFX::ImageEffectDescriptor& p_Desc, const std::string& p_Name, const std::string& p_Label,
-                                               const std::string& p_Hint, GroupParamDescriptor* p_Parent)
+    const std::string& p_Hint, GroupParamDescriptor* p_Parent)
 {
     ChoiceParamDescriptor* param = p_Desc.defineChoiceParam(p_Name);
     param->setLabels(p_Label, p_Label, p_Label);
@@ -1513,8 +1955,6 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     dstClip->addSupportedComponent(ePixelComponentAlpha);
     dstClip->setSupportsTiles(kSupportsTiles);
 
-
-
     // Make some pages and to things in
     PageParamDescriptor* page = p_Desc.definePageParam("Controls");
 
@@ -1534,8 +1974,22 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     GroupParamDescriptor* miscGroup = p_Desc.defineGroupParam("miscControls");
     miscGroup->setHint("Miscellaneous controls");
     miscGroup->setLabels("Misc. Controls", "Misc. Controls", "Misc. Controls");
+    GroupParamDescriptor* hiddenGroup = p_Desc.defineGroupParam("hiddenControls");
+    hiddenGroup->setHint("Hidden transform controls");
+    hiddenGroup->setLabels("Hidden Controls", "Hidden Controls", "Hidden Controls");
+    hiddenGroup->setIsSecret(true);
 
     // Make overall scale params
+    Double2DParamDescriptor* param2d = p_Desc.defineDouble2DParam("posXY");
+    param2d->setLabels("Translate XY", "Translate XY", "Translate XY");
+    param2d->setScriptName("posXY");
+    param2d->setHint("Translation along x and y-axes");
+    param2d->setDefault(0, 0);
+    param2d->setRange(-1000., -1000., 1000., 1000.);
+    param2d->setDisplayRange(-0.5, -0.5, 0.5, 0.5);
+    param2d->setDoubleType(eDoubleTypePlain);
+    param2d->setParent(*globalGroup);
+    page->addChild(*param2d);
     DoubleParamDescriptor* param = newDoubleParam(p_Desc, "posX", "Translate X", "Translation along x-axis", globalGroup, -1000., -10., 0., 10., 1000.);
     page->addChild(*param);
     param = newDoubleParam(p_Desc, "posY", "Translate Y", "Translation along y-axis", globalGroup, -1000., -10., 0., 10., 1000.);
@@ -1553,6 +2007,33 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     param = newDoubleParam(p_Desc, "sclY", "Scale Y", "Scale along y-axis", globalGroup, -1000., -10., 1., 10., 1000.);
     page->addChild(*param);
     param = newDoubleParam(p_Desc, "sclZ", "Scale Z", "Scale along z-axis", globalGroup, -1000., -10., 1., 10., 1000.);
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "ptX", "Translate X", "Translation along x-axis", hiddenGroup, -1000., -10., 0., 10., 1000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "ptY", "Translate Y", "Translation along y-axis", hiddenGroup, -1000., -10., 0., 10., 1000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "ptZ", "Translate Z", "Translation along z-axis", hiddenGroup, -1000., -10., 0., 10., 1000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "rtX", "Rotate X", "Rotation about x-axis", hiddenGroup, -360000., -360., 0., 360., 360000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "rtY", "Rotate Y", "Rotation about y-axis", hiddenGroup, -360000., -360., 0., 360., 360000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "rtZ", "Rotate Z", "Rotation about z-axis", hiddenGroup, -360000., -360., 0., 360., 360000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "stX", "Scale X", "Scale along x-axis", hiddenGroup, -1000., -10., 1., 10., 1000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "stY", "Scale Y", "Scale along y-axis", hiddenGroup, -1000., -10., 1., 10., 1000.);
+    
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "stZ", "Scale Z", "Scale along z-axis", hiddenGroup, -1000., -10., 1., 10., 1000.);
+    
     page->addChild(*param);
     param = newDoubleParam(p_Desc, "wPosX", "Wiggle Translate X", "Wiggle position along x-axis", wiggleGroup, -100., 0., 0., 1., 100.);
     page->addChild(*param);
@@ -1594,7 +2075,7 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     page->addChild(*param);
     param = newDoubleParam(p_Desc, "wrGlobal", "Wiggle Global Rate", "Global wiggle rate", wiggleGroup, 0., 0., 1., 10., 1000.);
     page->addChild(*param);
-    IntParamDescriptor *intParam = newIntParam(p_Desc, "wOctaves", "Wiggle Octaves", "Wiggle complexity", wiggleGroup, 1, 1, 1, 10, 10);
+    IntParamDescriptor* intParam = newIntParam(p_Desc, "wOctaves", "Wiggle Octaves", "Wiggle complexity", wiggleGroup, 1, 1, 1, 10, 10);
     page->addChild(*intParam);
     param = newDoubleParam(p_Desc, "wSeed", "Wiggle Seed", "Seed used to randomize wiggle", wiggleGroup, 0., 0., 0., 65536., 65536.);
     page->addChild(*param);
@@ -1662,7 +2143,7 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     page->addChild(*param);
     param = newDoubleParam(p_Desc, "elast", "Elasticity", "Elasticity factor", temporalGroup, 0., 0., 0., 5., 50.);
     page->addChild(*param);
-    BooleanParamDescriptor *boolParam = newBoolParam(p_Desc, "bounce", "Toggle Bouncing", "Toggle bouncing", temporalGroup, false);
+    BooleanParamDescriptor* boolParam = newBoolParam(p_Desc, "bounce", "Toggle Bouncing", "Toggle bouncing", temporalGroup, false);
     page->addChild(*boolParam);
     intParam = newIntParam(p_Desc, "hasParent", "Parent Index", "Index of parent transforms instance", miscGroup, 0, 0, 0, 16, 16);
     page->addChild(*intParam);
@@ -1680,6 +2161,14 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     choiceParam->appendOption("Repeat");
     choiceParam->appendOption("Reflect");
     page->addChild(*choiceParam);
+    param = newDoubleParam(p_Desc, "boundX1", "Crop Left", "Crop image read window from left side", miscGroup, 0., 0., 0., 1., 1.);
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "boundX2", "Crop Right", "Crop image read window from right side", miscGroup, 0., 0., 1., 1., 1.);
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "boundY1", "Crop Bottom", "Crop image read window from bottom side", miscGroup, 0., 0., 0., 1., 1.);
+    page->addChild(*param);
+    param = newDoubleParam(p_Desc, "boundY2", "Crop Top", "Crop image read window from top side", miscGroup, 0., 0., 1., 1., 1.);
+    page->addChild(*param);
     boolParam = newBoolParam(p_Desc, "wrapZ", "Wrap Above Horizon", "Wrap image above horizon", miscGroup, false);
     page->addChild(*boolParam);
     boolParam = newBoolParam(p_Desc, "xRatio", "Match Output Aspect", "Toggle translations to match output dimensions", miscGroup, false);
@@ -1688,6 +2177,15 @@ void TransformGPUFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, 
     page->addChild(*boolParam);
     boolParam = newBoolParam(p_Desc, "backToggle", "Render Backface", "Render backface", miscGroup, true);
     page->addChild(*boolParam);
+    boolParam = newBoolParam(p_Desc, "xyToggle", "Toggle XY Mode", "Switch between 1D/2D XY controls", miscGroup, false);
+    boolParam->setAnimates(false);
+    page->addChild(*boolParam);
+    PushButtonParamDescriptor* pushParam = p_Desc.definePushButtonParam("bake");
+    pushParam->setLabels("Bake Motion to Keyframes", "Bake Motion to Keyframes", "Bake Motion to Keyframes");
+    pushParam->setScriptName("bake");
+    pushParam->setHint("Bake all motion parameters to global transform channels. Does not consider parent transform data!");
+    pushParam->setParent(*miscGroup);
+    page->addChild(*pushParam);
 }
 
 ImageEffect* TransformGPUFactory::createInstance(OfxImageEffectHandle p_Handle, ContextEnum /*p_Context*/)

@@ -59,4 +59,5 @@ private:
 
 extern float buffers[64][16][25];
 extern int transformIndex;
+extern double frameRate;
 #endif

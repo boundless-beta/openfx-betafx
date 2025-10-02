@@ -155,38 +155,8 @@ static std::string kWriteImage(int index) {
     return "write_imagef(" + buff + ", (int2)(x, y), kOutput); \n";
 }
 
-static inline cl_mem bufferQuery(cl_context clContext, cl_command_queue cmdQ, size_t bufferSize, cl_mem_flags flags, int index)
-{
-    static std::map<int, cl_mem> bufferIO;
-    cl_mem theBuffer;
-    std::map<int, cl_mem>::iterator iter = bufferIO.find(index);
-    if (iter == bufferIO.end())
-    {
-        // create new buffer
-        theBuffer = clCreateBuffer(clContext, flags, bufferSize, NULL, NULL);
-        float zero = 0.;
-        clEnqueueFillBuffer(cmdQ, theBuffer, &zero, sizeof(float), 0, bufferSize, 0, NULL, NULL);
-        bufferIO[index] = theBuffer;
-    }
-    else { //buffer of differing size exists
-        size_t currentSize;
-        clGetMemObjectInfo(iter->second, CL_MEM_SIZE, sizeof(size_t), &currentSize, NULL);
-        if (currentSize != bufferSize) {
-            // update existing buffer
-            theBuffer = clCreateBuffer(clContext, flags, bufferSize, NULL, NULL);
-            bufferIO[index] = theBuffer;
-        }
-        else
-        {
-            // find existing buffer
-            theBuffer = iter->second;
-        }
-    }
-    return theBuffer;
-}
-
 template<class PIX>
-void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output)
+void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const PIX* p_Input, PIX* p_Output, bool isDisabled)
 {
     cl_int error;
 
@@ -329,6 +299,18 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
         buffer3 = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_READ_WRITE, 3);
         buffersCreated = true;
     }
+
+    cl_mem inBuffer = NULL, outBuffer = NULL;
+    bufferSize = bits == 8 ? sizeof(char) : sizeof(float);
+    bufferSize *= p_Width * p_Height * 4;
+    if (isDisabled)
+    {
+        inBuffer = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_READ_ONLY, -1);
+        outBuffer = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_WRITE_ONLY, -2);
+        clEnqueueWriteBuffer(cmdQ, inBuffer, CL_TRUE, 0, bufferSize, p_Input, 0, NULL, NULL);
+    }
+
+
     int count = 0;
     error = clSetKernelArg(clKernel, count++, sizeof(int), &p_Width);
     error |= clSetKernelArg(clKernel, count++, sizeof(int), &p_Height);
@@ -349,8 +331,14 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
     error |= clSetKernelArg(clKernel, count++, sizeof(float), &floats[13]);
     error |= clSetKernelArg(clKernel, count++, sizeof(float), &floats[14]);
     error |= clSetKernelArg(clKernel, count++, sizeof(float), &floats[15]);
-    error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &p_Input);
-    error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &p_Output);
+    if (isDisabled) {
+        error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &inBuffer);
+        error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &outBuffer);
+    }
+    else {
+        error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &p_Input);
+        error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &p_Output);
+    }
     error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &buffer0);
     error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &buffer1);
     error |= clSetKernelArg(clKernel, count++, sizeof(cl_mem), &buffer2);
@@ -369,6 +357,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
     globalWorkSize[1] = p_Height;
 
     clEnqueueNDRangeKernel(cmdQ, clKernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
+    if (isDisabled) clEnqueueReadBuffer(cmdQ, outBuffer, CL_TRUE, 0, bufferSize, p_Output, 0, NULL, NULL);
     clReleaseMemObject(bufferV);
 }
 template<class PIX>
@@ -567,8 +556,8 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
     clReleaseMemObject(bufferV);
 }
 
-template void RunOpenCLKernelBuffers<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const unsigned char* p_Input, unsigned char* p_Output);
-template void RunOpenCLKernelBuffers<float>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const float* p_Input, float* p_Output);
+template void RunOpenCLKernelBuffers<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const unsigned char* p_Input, unsigned char* p_Output, bool isDisabled);
+template void RunOpenCLKernelBuffers<float>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const float* p_Input, float* p_Output, bool isDisabled);
 
 template void RunOpenCLKernelImages<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const unsigned char* p_Input, unsigned char* p_Output);
 template void RunOpenCLKernelImages<float>(void* p_CmdQ, int p_Width, int p_Height, std::string kernel, float* floats, int instance, float timeIn, int bits, bool errorLog, const float* p_Input, float* p_Output);

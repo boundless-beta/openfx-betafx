@@ -24,8 +24,9 @@
 
 cl_mem buffersCL;
 
+
 const char* KernelSourceBuffers = "\n" \
-"__kernel void transformBuffers(int p_Width, int p_Height, float m0x, float m0y, float m0z, float m00, float m01, float m02, float m03, float m04, float m05, float m06, float m07, float m08, float m1x, float m1y, float m1z, float m10, float m11, float m12, float m13, float m14, float m15, float m16, float m17, float m18, int p_wX, int p_wY, int p_wZ, float mb, float xScale, float yScale, float zScale, float xRot, float yRot, float zRot, int pIndex, int pSend, int now, int off, int forward, __global void* p_Input, __global void* p_Output, __global float* buffers, int bits)\n"\
+"__kernel void transformBuffers(int p_Width, int p_Height, float m0x, float m0y, float m0z, float m00, float m01, float m02, float m03, float m04, float m05, float m06, float m07, float m08, float m1x, float m1y, float m1z, float m10, float m11, float m12, float m13, float m14, float m15, float m16, float m17, float m18, int p_wX, int p_wY, int p_wZ, float mb, float xScale, float yScale, float zScale, float xRot, float yRot, float zRot, int pIndex, int pSend, int now, int off, int forward, __global void* p_Input, __global void* p_Output, __global float* buffers, int bits, float boundX1, float boundX2, float boundY1, float boundY2)\n"\
 "{\n"\
 "	int index = get_global_id(0) + get_global_id(1) * p_Width;                                                                       \n"\
 "			int x = index % p_Width;                                                                                                 \n"\
@@ -129,29 +130,34 @@ const char* KernelSourceBuffers = "\n" \
 "					} else {                                                                                                         \n"\
 "						plot = plot1;                                                                                            \n"\
 "					}                                                                                                         \n"\
-"							float tx = plot.x * xWin;                                                                               \n"\
-"							float ty = plot.y * yWin;                                                                               \n"\
+"							float tx = (plot.x - boundX1) * xWin;                                                                    \n"\
+"							float ty = (plot.y - boundY1) * yWin;                                                                    \n"\
 "                                                                                                                                    \n"\
+"                                                                                                                                    \n"\
+"                           float xCrop = (xWin*(boundX2-boundX1));                                                                 \n"\
+"                           float yCrop = (yWin*(boundY2-boundY1));                                                                 \n"\
 "							switch ((int)(p_wX)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
-"								tx -= xWin * floor(tx / xWin);                                                                   \n"\
+"								tx -= xCrop * floor(tx / xCrop);                     \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								tx = xWin - fabs((tx - 2. * xWin * floor(tx / xWin / 2.)) - xWin);                                    \n"\
+"								tx = xCrop - fabs((tx - 2. * xCrop * floor(tx / xCrop / 2.)) - xCrop);                                    \n"\
 "							}                                                                                                        \n"\
 "							switch ((int)(p_wY)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
-"								ty -= yWin * floor(ty / yWin);                                                                   \n"\
+"								ty -= yCrop * floor(ty / yCrop);                                                                   \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								ty = yWin - fabs((ty - 2. * yWin * floor(ty / yWin / 2.)) - yWin);                                    \n"\
+"								ty = yCrop - fabs((ty - 2. * yCrop * floor(ty / yCrop / 2.)) - yCrop);                                    \n"\
 "							}                                                                                                        \n"\
-"							if(p_wX != 0) tx = tx < 0. ? 0. : (tx > xWin - 1. ? xWin - 1. : tx);                                    \n"\
-"							if(p_wY != 0) ty = ty < 0. ? 0. : (ty > yWin - 1. ? yWin - 1. : ty);                                    \n"\
-"							int ix = (int)floor(tx);                                                                                 \n"\
-"							int iy = (int)floor(ty);                                                                                 \n"\
+"							if(p_wX != 0) tx = tx < 0. ? 0. : (tx > xCrop - 1. ? xCrop - 1. : tx);                                    \n"\
+"							if(p_wY != 0) ty = ty < 0. ? 0. : (ty > yCrop - 1. ? yCrop - 1. : ty);                                    \n"\
+"								tx += boundX1*xWin;                     \n"\
+"								ty += boundY1*yWin;                     \n"\
+"							int ix = (int)round(tx);                                                                                 \n"\
+"							int iy = (int)round(ty);                                                                                 \n"\
 "                                                                                                                                    \n"\
-"							if (!horizon && (tx >= 0. && tx < xWin) && (ty >= 0. && ty < yWin))                                              \n"\
+"							if (!horizon && (tx >= boundX1*xWin && tx < boundX2*xWin) && (ty >= boundY1*yWin && ty < boundY2*yWin))                                              \n"\
 "							{                                                                                                        \n"\
 "							    tx += 0.5;                                                                                                        \n"\
 "							    ty += 0.5;                                                                                                    \n"\
@@ -159,15 +165,15 @@ const char* KernelSourceBuffers = "\n" \
 "							    ty = ty < 0. ? 0. : (ty > yWin - 1. ? yWin - 1. : ty);                                    \n"\
 "								const int index2 = (iy * xWin + ix) * 4;                                                \n"\
 "								if(bits == 8) {                                                                                      \n"\
-"								value.x += ((__global unsigned char*)p_Input)[index2 + 0] / bMax;              \n"\
-"								value.y += ((__global unsigned char*)p_Input)[index2 + 1] / bMax;              \n"\
-"								value.z += ((__global unsigned char*)p_Input)[index2 + 2] / bMax;              \n"\
-"								value.w += ((__global unsigned char*)p_Input)[index2 + 3] / bMax;              \n"\
+"								value.x += ((__global unsigned char*)p_Input)[index2 + 0] / (float)bMax;              \n"\
+"								value.y += ((__global unsigned char*)p_Input)[index2 + 1] / (float)bMax;              \n"\
+"								value.z += ((__global unsigned char*)p_Input)[index2 + 2] / (float)bMax;              \n"\
+"								value.w += ((__global unsigned char*)p_Input)[index2 + 3] / (float)bMax;              \n"\
 "							} else {                                                                                                 \n"\
-"								value.x += ((__global float*)p_Input)[index2 + 0] / bMax;                      \n"\
-"								value.y += ((__global float*)p_Input)[index2 + 1] / bMax;                      \n"\
-"								value.z += ((__global float*)p_Input)[index2 + 2] / bMax;                      \n"\
-"								value.w += ((__global float*)p_Input)[index2 + 3] / bMax;                      \n"\
+"								value.x += ((__global float*)p_Input)[index2 + 0] / (float)bMax;                      \n"\
+"								value.y += ((__global float*)p_Input)[index2 + 1] / (float)bMax;                      \n"\
+"								value.z += ((__global float*)p_Input)[index2 + 2] / (float)bMax;                      \n"\
+"								value.w += ((__global float*)p_Input)[index2 + 3] / (float)bMax;                      \n"\
 "							}                                                                                                        \n"\
 "					    }                                                                                                              \n"\
 "			}                                                                                                                        \n"\
@@ -206,7 +212,7 @@ const char* KernelSourceBuffers = "\n" \
 
 const char* KernelSourceImages = "\n" \
 "__constant sampler_t imageSampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_LINEAR;  \n" \
-"__kernel void transformImages(int p_Width, int p_Height, float m0x, float m0y, float m0z, float m00, float m01, float m02, float m03, float m04, float m05, float m06, float m07, float m08, float m1x, float m1y, float m1z, float m10, float m11, float m12, float m13, float m14, float m15, float m16, float m17, float m18, int p_wX, int p_wY, int p_wZ, float mb, float xScale, float yScale, float zScale, float xRot, float yRot, float zRot, int pIndex, int pSend, int now, int off, int forward, __read_only image2d_t p_Input, __write_only image2d_t p_Output, __global float* buffers, int bits)\n"\
+"__kernel void transformImages(int p_Width, int p_Height, float m0x, float m0y, float m0z, float m00, float m01, float m02, float m03, float m04, float m05, float m06, float m07, float m08, float m1x, float m1y, float m1z, float m10, float m11, float m12, float m13, float m14, float m15, float m16, float m17, float m18, int p_wX, int p_wY, int p_wZ, float mb, float xScale, float yScale, float zScale, float xRot, float yRot, float zRot, int pIndex, int pSend, int now, int off, int forward, __read_only image2d_t p_Input, __write_only image2d_t p_Output, __global float* buffers, int bits, float boundX1, float boundX2, float boundY1, float boundY2)\n"\
 "{                                                                                                                                   \n"\
 "	int index = get_global_id(0) + get_global_id(1) * p_Width;                                                                       \n"\
 "			int x = index % p_Width;                                                                                                 \n"\
@@ -313,27 +319,32 @@ const char* KernelSourceImages = "\n" \
 "					} else {                                                                                                         \n"\
 "						plot = plot1;                                                                                            \n"\
 "					}                                                                                                         \n"\
-"							float tx = plot.x * xWin;                                                                               \n"\
-"							float ty = plot.y * yWin;                                                                               \n"\
+"							float tx = (plot.x - boundX1) * xWin;                                                                    \n"\
+"							float ty = (plot.y - boundY1) * yWin;                                                                    \n"\
 "                                                                                                                                    \n"\
+"                                                                                                                                    \n"\
+"                           float xCrop = (xWin*(boundX2-boundX1));                                                                 \n"\
+"                           float yCrop = (yWin*(boundY2-boundY1));                                                                 \n"\
 "							switch ((int)(p_wX)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
-"								tx -= xWin * floor(tx / xWin);                                                                   \n"\
+"								tx -= xCrop * floor(tx / xCrop);                     \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								tx = xWin - fabs((tx - 2. * xWin * floor(tx / xWin / 2.)) - xWin);                                    \n"\
+"								tx = xCrop - fabs((tx - 2. * xCrop * floor(tx / xCrop / 2.)) - xCrop);                                    \n"\
 "							}                                                                                                        \n"\
 "							switch ((int)(p_wY)) {                                                                                   \n"\
 "							case 2:                                                                                                  \n"\
-"								ty -= yWin * floor(ty / yWin);                                                                   \n"\
+"								ty -= yCrop * floor(ty / yCrop);                                                                   \n"\
 "								break;                                                                                               \n"\
 "							case 3:                                                                                                  \n"\
-"								ty = yWin - fabs((ty - 2. * yWin * floor(ty / yWin / 2.)) - yWin);                                    \n"\
+"								ty = yCrop - fabs((ty - 2. * yCrop * floor(ty / yCrop / 2.)) - yCrop);                                    \n"\
 "							}                                                                                                        \n"\
-"							if(p_wX != 0) tx = tx < 0. ? 0. : (tx > xWin - 1. ? xWin - 1. : tx);                                    \n"\
-"							if(p_wY != 0) ty = ty < 0. ? 0. : (ty > yWin - 1. ? yWin - 1. : ty);                                    \n"\
+"							if(p_wX != 0) tx = tx < 0. ? 0. : (tx > xCrop - 1. ? xCrop - 1. : tx);                                    \n"\
+"							if(p_wY != 0) ty = ty < 0. ? 0. : (ty > yCrop - 1. ? yCrop - 1. : ty);                                    \n"\
+"								tx += boundX1*xWin;                     \n"\
+"								ty += boundY1*yWin;                     \n"\
 "                                                                                                                                    \n"\
-"							if (!horizon && (tx >= 0. && tx < xWin) && (ty >= 0. && ty < yWin))                                              \n"\
+"							if (!horizon && (tx >= boundX1*xWin && tx < boundX2*xWin) && (ty >= boundY1*yWin && ty < boundY2*yWin))                                              \n"\
 "							{                                                                                                        \n"\
 "							    tx += 0.5;                                                                                          \n"\
 "							    ty += 0.5;                                                                                          \n"\
@@ -381,7 +392,7 @@ const char *KernelSourceImages = "\n" \
 
 
 template<class PIX>
-void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output)
+void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const void* p_Input, void* p_Output, bool isDisabled, float* bounds)
 {
     cl_int error;
 
@@ -438,6 +449,19 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, 
     if (clGetMemObjectInfo(buffersCL, CL_MEM_SIZE, sizeof(int), NULL, NULL) != 0) {
         buffersCL = clCreateBuffer(clContext, CL_MEM_READ_WRITE | CL_MEM_USE_HOST_PTR, 64 * 25 * 16 * sizeof(float), &buffers, NULL);
     }
+
+    size_t bufferSize = bits == 8 ? sizeof(char) : sizeof(float);
+    bufferSize *= p_Width * p_Height * 4;
+    cl_mem inBuffer = NULL, outBuffer = NULL;
+    if (isDisabled)
+    {
+        inBuffer = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_READ_ONLY, -1);
+        outBuffer = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_WRITE_ONLY, -2);
+        clEnqueueWriteBuffer(cmdQ, inBuffer, CL_TRUE, 0, bufferSize, p_Input, 0, NULL, NULL);
+    }
+
+    // Copy the buffer from the CPU to the plugin device
+
     locker.Unlock();
 
     int count = 0;
@@ -482,10 +506,20 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, 
     error |= clSetKernelArg(kernel, count++, sizeof(int), &now);
     error |= clSetKernelArg(kernel, count++, sizeof(int), &toggle);
     error |= clSetKernelArg(kernel, count++, sizeof(int), &front);
-    error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &p_Input);
-    error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &p_Output);
+    if (isDisabled) {
+        error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &inBuffer);
+        error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &outBuffer);
+    }
+    else {
+        error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &p_Input);
+        error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &p_Output);
+    }
     error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &buffersCL);
     error |= clSetKernelArg(kernel, count++, sizeof(int), &bits);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[0]);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[1]);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[2]);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[3]);
 
     CheckError(error, "Unable to set kernel arguments");
 
@@ -496,6 +530,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, 
     globalWorkSize[1] = p_Height;
 
     clEnqueueNDRangeKernel(cmdQ, kernel, 2, NULL, globalWorkSize, localWorkSize, 0, NULL, NULL);
+    if (isDisabled) clEnqueueReadBuffer(cmdQ, outBuffer, CL_TRUE, 0, bufferSize, p_Output, 0, NULL, NULL);
     if (send != 0) {
         locker.Lock();
         clEnqueueReadBuffer(cmdQ, buffersCL, CL_TRUE, sizeof(float) * ((send - 1) * 25), sizeof(float) * 25, &(buffers[0][send - 1][0]), 0, NULL, NULL);
@@ -504,7 +539,7 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, float* m0, 
     // clReleaseMemObject(buffersCL);
 }
 template<class PIX>
-void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output)
+void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const PIX* p_Input, PIX* p_Output, float* bounds)
 {
     cl_int error;
 
@@ -609,6 +644,10 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, f
     error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &p_Output);
     error |= clSetKernelArg(kernel, count++, sizeof(cl_mem), &buffersCL);
     error |= clSetKernelArg(kernel, count++, sizeof(int), &bits);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[0]);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[1]);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[2]);
+    error |= clSetKernelArg(kernel, count++, sizeof(float), &bounds[3]);
 
     //float mb, float xScale, float yScale, float zScale, float xRot, float yRot, float zRot, int pIndex, int pSend, int now, int off, int forward, __read_only image2d_t p_Input, __write_only image2d_t p_Output, __global 
     CheckError(error, "Unable to set kernel arguments");
@@ -628,8 +667,8 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, float* m0, f
     // clReleaseMemObject(buffersCL);
 }
 
-template void RunOpenCLKernelBuffers<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const unsigned char* p_Input, unsigned char* p_Output);
-template void RunOpenCLKernelBuffers<float>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const float* p_Input, float* p_Output);
+template void RunOpenCLKernelBuffers<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const void* p_Input, void* p_Output, bool isDisabled, float* bounds);
+template void RunOpenCLKernelBuffers<float>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const void* p_Input, void* p_Output, bool isDisabled, float* bounds);
 
-template void RunOpenCLKernelImages<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const unsigned char* p_Input, unsigned char* p_Output);
-template void RunOpenCLKernelImages<float>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const float* p_Input, float* p_Output);
+template void RunOpenCLKernelImages<unsigned char>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const unsigned char* p_Input, unsigned char* p_Output, float* bounds);
+template void RunOpenCLKernelImages<float>(void* p_CmdQ, int p_Width, int p_Height, float* m0, float* m1, int p_wX, int p_wY, int p_wZ, float blur, float* scales, float* angles, int index, int send, int now, int toggle, int front, int bits, const float* p_Input, float* p_Output, float* bounds);
