@@ -239,12 +239,12 @@ void RunOpenCLKernelBuffers(void* p_CmdQ, int p_Width, int p_Height, std::string
             kReadPos = kernThing.find("kRead(", kReadPos + 1);
         }
         while (kWritePos != std::string::npos) {
-            const std::string kBx = kernel.substr(kWritePos + 7, 1);
+            const std::string kBx = kernThing.substr(kWritePos + 7, 1);
             if (kBx == "1" || kBx == "2" || kBx == "3" || kBx == "0") {
                 std::string kWriteB = kWriteBuffer(std::stoi(kBx));
                 kernThing.replace(kWritePos, 9, kWriteB);
             }
-            kWritePos = kernel.find("kWrite(", kWritePos + 1);
+            kWritePos = kernThing.find("kWrite(", kWritePos + 1);
         }
         kernThing = kernelStart + kernThing + kernelEnd;
 
