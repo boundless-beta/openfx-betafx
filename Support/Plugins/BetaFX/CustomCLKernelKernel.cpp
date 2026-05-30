@@ -498,12 +498,6 @@ void RunOpenCLKernelImages(void* p_CmdQ, int p_Width, int p_Height, std::string 
     form.image_channel_order = CL_RGBA;
     form.image_channel_data_type = CL_FLOAT;
     if (bufferSize != p_Width * p_Height * 4 * sizeof(float) || !buffersCreated) {
-        if (buffersCreated) {
-            clReleaseMemObject(buffer0);
-            clReleaseMemObject(buffer1);
-            clReleaseMemObject(buffer2);
-            clReleaseMemObject(buffer3);
-        }
         bufferSize = p_Width * p_Height * 4 * sizeof(float);
         buffer0 = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_READ_WRITE, 0);
         buffer1 = bufferQuery(clContext, cmdQ, bufferSize, CL_MEM_READ_WRITE, 1);

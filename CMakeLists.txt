@@ -80,7 +80,7 @@ if(OFX_SUPPORTS_OPENGLRENDER)
 endif()
 
 # Build
-add_subdirectory(HostSupport)
+# add_subdirectory(HostSupport)
 add_subdirectory(Support)
 if(BUILD_EXAMPLE_PLUGINS)
   add_subdirectory(Examples)

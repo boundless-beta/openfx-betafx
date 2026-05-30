@@ -36,6 +36,7 @@ static inline cl_mem bufferQuery(cl_context clContext, cl_command_queue cmdQ, si
         clGetMemObjectInfo(iter->second, CL_MEM_SIZE, sizeof(size_t), &currentSize, NULL);
         if (currentSize != bufferSize) {
             // update existing buffer
+            clReleaseMemObject(bufferIO[index]);
             theBuffer = clCreateBuffer(clContext, flags, bufferSize, NULL, NULL);
             bufferIO[index] = theBuffer;
         }
